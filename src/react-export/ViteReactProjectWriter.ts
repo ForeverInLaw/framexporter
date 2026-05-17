@@ -20,6 +20,7 @@ export class ViteReactProjectWriter {
       this.#writeViteConfig(),
       this.#writeMain(),
       this.#writeViteEnv(),
+      this.#writeFavicon(),
       this.#writeApp(pages.map((page) => page.route)),
       this.#writeCss(pages),
       ...pages.map((page) => this.#writePage(page)),
@@ -100,6 +101,10 @@ export class ViteReactProjectWriter {
     await this.#writeText(path.join("src", "vite-env.d.ts"), "/// <reference types=\"vite/client\" />\n");
   }
 
+  async #writeFavicon(): Promise<void> {
+    await this.#writeText(path.join("public", "favicon.ico"), "");
+  }
+
   async #writeApp(routes: ReactRouteSource[]): Promise<void> {
     const imports = routes.map((route) => `import { ${route.componentName} } from "./pages/${route.fileName.replace(/\.tsx$/, "")}";`).join("\n");
     const routeEntries = routes.map((route) => `  { path: ${JSON.stringify(route.routePath)}, Component: ${route.componentName} },`).join("\n");
@@ -111,7 +116,7 @@ export class ViteReactProjectWriter {
 
   async #writeCss(pages: ConvertedPage[]): Promise<void> {
     const css = pages.map((page) => this.#rewriteCssUrls(page.css)).filter(Boolean).join("\n\n");
-    const baseCss = `html, body, #root { margin: 0; min-height: 100%; }\nbody { font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }\na { color: inherit; }\n*, *::before, *::after { box-sizing: border-box; }\n`;
+    const baseCss = `html, body, #root { margin: 0; min-height: 100%; }\nbody { font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }\na { color: inherit; }\n*, *::before, *::after { box-sizing: border-box; }\n#root > * { animation: framexporter-fade-in 640ms cubic-bezier(.2, .8, .2, 1) both; }\n[class^="framer-"], [class*=" framer-"] { transition-property: opacity, transform, background, border-color, color, box-shadow; transition-duration: 220ms; transition-timing-function: ease; }\n@keyframes framexporter-fade-in { from { opacity: .001; transform: translateY(12px); } to { opacity: 1; transform: none; } }\n`;
     await this.#writeText(path.join("src", "styles", "generated.css"), `${baseCss}\n${css}\n`);
   }
 

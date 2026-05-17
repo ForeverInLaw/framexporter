@@ -28,6 +28,8 @@ const ATTRIBUTE_RENAMES = new Map<string, string>([
   ["stroke-width", "strokeWidth"],
   ["stroke-linecap", "strokeLinecap"],
   ["stroke-linejoin", "strokeLinejoin"],
+  ["stop-color", "stopColor"],
+  ["stop-opacity", "stopOpacity"],
 ]);
 
 const BOOLEAN_ATTRIBUTES = new Set(["allowFullScreen", "async", "autoFocus", "autoPlay", "checked", "controls", "default", "defer", "disabled", "hidden", "loop", "multiple", "muted", "open", "playsInline", "readOnly", "required", "selected"]);
@@ -107,14 +109,14 @@ export class HtmlToTsxConverter {
       if (rawName.startsWith("data-framer") || rawName === "data-highlighted") {
         continue;
       }
-      if (rawName === "space") {
+      if (rawName === "space" || rawName === "weight") {
         continue;
       }
       if (rawName === "name" && !this.#allowsNameAttribute(element.name)) {
         continue;
       }
 
-      const name = ATTRIBUTE_RENAMES.get(rawName.toLowerCase()) ?? rawName;
+      const name = this.#normalizedAttributeName(element.name, rawName);
       const value = this.#rewriteAttributeValue(name, rawValue, route);
       if (name === "style") {
         const styleObject = this.#styleToObject(value);
@@ -132,6 +134,14 @@ export class HtmlToTsxConverter {
       attributes.push(`${name}=${this.#attributeExpression(name, value)}`);
     }
     return attributes.join(" ");
+  }
+
+  #normalizedAttributeName(tagName: string, rawName: string): string {
+    const renamed = ATTRIBUTE_RENAMES.get(rawName.toLowerCase()) ?? rawName;
+    if (renamed === "value" && ["input", "textarea"].includes(tagName)) {
+      return "defaultValue";
+    }
+    return renamed;
   }
 
   #allowsNameAttribute(tagName: string): boolean {
@@ -206,6 +216,9 @@ export class HtmlToTsxConverter {
   }
 
   #camelCase(value: string): string {
+    if (value.startsWith("--")) {
+      return value;
+    }
     return value.replace(/-([a-z])/g, (_, char: string) => char.toUpperCase());
   }
 
