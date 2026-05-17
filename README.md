@@ -38,7 +38,7 @@ npm install
 npm run dev
 ```
 
-The React exporter creates a Vite app with route components under `src/pages`, shared exact-match and conservative prop-inferred components under `src/components`, a simple pathname router in `src/App.tsx`, copied assets under `public/assets`, and generated CSS under `src/styles/generated.css`.
+The React exporter creates a Vite app with route components under `src/pages`, shared exact-match, prop-inferred, and heuristically named components under `src/components`, a simple pathname router in `src/App.tsx`, copied assets under `public/assets`, and generated CSS under `src/styles/generated.css`.
 
 ## Output
 

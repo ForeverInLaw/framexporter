@@ -34,4 +34,5 @@ export type SharedComponent = {
   readonly occurrenceCount: number;
   readonly props?: string[];
   readonly propSlotIndexes?: number[];
+  readonly propSamples?: readonly string[][];
 };

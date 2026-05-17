@@ -233,9 +233,25 @@ export class PropComponentExtractor {
       occurrenceCount: candidate.occurrences.length,
       props: propNames,
       propSlotIndexes: variableIndexes,
+      propSamples: this.#propSamples(candidate, variableIndexes),
     };
   }
 
+
+  #propSamples(candidate: BlockCandidate, variableIndexes: number[]): string[][] {
+    return variableIndexes.map((slotIndex) => {
+      const samples = candidate.occurrences.map((occurrence) => this.#decodeLiteral(occurrence.values[slotIndex]));
+      return [...new Set(samples)].slice(0, 5);
+    });
+  }
+
+  #decodeLiteral(literal: string): string {
+    try {
+      return JSON.parse(literal) as string;
+    } catch {
+      return literal.replace(/^"|"$/g, "");
+    }
+  }
   #componentBody(candidate: BlockCandidate, variableIndexes: number[], propNames: string[]): string {
     let body = candidate.template;
     candidate.slotKinds.forEach((_, index) => {
@@ -319,4 +335,3 @@ export class PropComponentExtractor {
     }
   }
 }
-

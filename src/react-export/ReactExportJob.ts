@@ -2,6 +2,7 @@ import path from "node:path";
 import { ComponentExtractor } from "./ComponentExtractor.js";
 import { HtmlToTsxConverter } from "./HtmlToTsxConverter.js";
 import { PropComponentExtractor } from "./PropComponentExtractor.js";
+import { SemanticComponentNamer } from "./SemanticComponentNamer.js";
 import { StaticExportReader } from "./StaticExportReader.js";
 import type { ConvertedPage, ReactExportOptions } from "./types.js";
 import { ViteReactProjectWriter } from "./ViteReactProjectWriter.js";
@@ -18,6 +19,7 @@ export class ReactExportJob {
   readonly #converter = new HtmlToTsxConverter();
   readonly #propExtractor = new PropComponentExtractor();
   readonly #exactExtractor = new ComponentExtractor();
+  readonly #namer = new SemanticComponentNamer();
   readonly #writer: ViteReactProjectWriter;
   readonly #options: ReactExportOptions;
 
@@ -36,16 +38,16 @@ export class ReactExportJob {
     const rawPages: ConvertedPage[] = source.routes.map((route) => this.#converter.convert(route));
     const propProject = this.#propExtractor.extract(rawPages);
     const exactProject = this.#exactExtractor.extract(propProject.pages);
-    const components = [...propProject.components, ...exactProject.components];
-    await this.#writer.write(exactProject.pages, components);
+    const namedProject = this.#namer.rename(exactProject.pages, [...propProject.components, ...exactProject.components]);
+    await this.#writer.write(namedProject.pages, namedProject.components);
 
     return {
-      routes: exactProject.pages.length,
-      components: components.length,
+      routes: namedProject.pages.length,
+      components: namedProject.components.length,
       outputDir: this.#options.outputDir,
       warnings: [
         "Clean React export is experimental: complex Framer interactions, CMS queries, forms, ecommerce, and custom runtime animations are not reconstructed yet.",
-        "Generated components use conservative prop inference for repeated JSX shapes; semantic naming is planned as a later compiler pass.",
+        "Generated components use conservative prop inference and heuristic names; manual cleanup is still expected for production-quality source code.",
       ],
     };
   }
