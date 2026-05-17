@@ -15,6 +15,7 @@ const URL_ATTRIBUTES = [
 ] as const;
 
 const ASSET_URL_ATTRIBUTES = URL_ATTRIBUTES.filter(([selector]) => selector !== "a" && selector !== "iframe");
+const FRAMER_SCROLLBAR_FIX_CSS = `html,body,[class^="framer-"],[class*=" framer-"]{scrollbar-width:none;-ms-overflow-style:none}html::-webkit-scrollbar,body::-webkit-scrollbar,[class^="framer-"]::-webkit-scrollbar,[class*=" framer-"]::-webkit-scrollbar{width:0;height:0;display:none}`;
 
 export class AssetRewriter {
   constructor(
@@ -137,6 +138,7 @@ export class AssetRewriter {
       }
     });
 
+    this.#injectScrollbarFix($);
     return $.html().replace(/<script\b[^>]*src=["']https:\/\/events\.framer\.com\/script[^>]*><\/script>/gi, "");
   }
 
@@ -176,6 +178,19 @@ export class AssetRewriter {
     return [...urls].sort();
   }
 
+  #injectScrollbarFix($: cheerio.CheerioAPI): void {
+    if ($("style[data-framexporter-scrollbar-fix]").length > 0) {
+      return;
+    }
+
+    const style = `<style data-framexporter-scrollbar-fix>${FRAMER_SCROLLBAR_FIX_CSS}</style>`;
+    const head = $("head");
+    if (head.length > 0) {
+      head.append(style);
+      return;
+    }
+    $.root().prepend(style);
+  }
   #rewriteSingleUrl(rawUrl: string | undefined, baseUrl: string, fromLocalPath: string): string | undefined {
     if (!rawUrl || this.#shouldIgnore(rawUrl)) {
       return undefined;
