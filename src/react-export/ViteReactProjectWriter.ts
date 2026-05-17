@@ -1,12 +1,13 @@
 import { cp, mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
-import type { ConvertedPage, ReactExportOptions, ReactRouteSource } from "./types.js";
+import type { ConvertedPage, ReactExportOptions, ReactRouteSource, SharedComponent } from "./types.js";
 
 export class ViteReactProjectWriter {
   constructor(private readonly options: ReactExportOptions) {}
 
-  async write(pages: ConvertedPage[]): Promise<void> {
+  async write(pages: ConvertedPage[], components: SharedComponent[]): Promise<void> {
     await rm(this.options.outputDir, { recursive: true, force: true });
+    await mkdir(path.join(this.options.outputDir, "src", "components"), { recursive: true });
     await mkdir(path.join(this.options.outputDir, "src", "pages"), { recursive: true });
     await mkdir(path.join(this.options.outputDir, "src", "styles"), { recursive: true });
     await mkdir(path.join(this.options.outputDir, "public"), { recursive: true });
@@ -22,6 +23,7 @@ export class ViteReactProjectWriter {
       this.#writeApp(pages.map((page) => page.route)),
       this.#writeCss(pages),
       ...pages.map((page) => this.#writePage(page)),
+      ...components.map((component) => this.#writeSharedComponent(component)),
     ]);
   }
 
@@ -114,9 +116,20 @@ export class ViteReactProjectWriter {
   }
 
   async #writePage(page: ConvertedPage): Promise<void> {
+    const imports = [...new Set(page.componentImports)]
+      .sort()
+      .map((name) => `import { ${name} } from "../components/${name}";`)
+      .join("\n");
     await this.#writeText(
       path.join("src", "pages", page.route.fileName),
-      `import type * as React from "react";\n\nexport function ${page.route.componentName}() {\n  return (\n    <>\n${page.jsx}\n    </>\n  );\n}\n`,
+      `${this.#reactTypeImport()}${imports ? `${imports}\n\n` : ""}export function ${page.route.componentName}() {\n  return (\n    <>\n${page.jsx}\n    </>\n  );\n}\n`,
+    );
+  }
+
+  async #writeSharedComponent(component: SharedComponent): Promise<void> {
+    await this.#writeText(
+      path.join("src", "components", component.fileName),
+      `${this.#reactTypeImport()}export function ${component.name}() {\n  return (\n    <>\n${this.#indentBody(component.body, 3)}\n    </>\n  );\n}\n`,
     );
   }
 
@@ -134,6 +147,15 @@ export class ViteReactProjectWriter {
     });
   }
 
+  #indentBody(body: string, depth: number): string {
+    const indent = "  ".repeat(depth);
+    return body.split("\n").map((line) => `${indent}${line}`).join("\n");
+  }
+
+  #reactTypeImport(): string {
+    return `import type * as React from "react";\n\n`;
+  }
+
   async #writeJson(relativePath: string, value: unknown): Promise<void> {
     await this.#writeText(relativePath, `${JSON.stringify(value, null, 2)}\n`);
   }
@@ -144,4 +166,3 @@ export class ViteReactProjectWriter {
     await writeFile(absolutePath, text, "utf8");
   }
 }
-

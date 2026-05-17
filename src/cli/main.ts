@@ -66,6 +66,7 @@ async function runReactExport(args: ParsedArgs): Promise<void> {
   const result = await job.run();
 
   console.log(`Generated ${result.routes} React route component(s).`);
+  console.log(`Extracted ${result.components} shared component(s).`);
   console.log(`Output: ${result.outputDir}`);
   if (result.warnings.length > 0) {
     console.log("Warnings:");

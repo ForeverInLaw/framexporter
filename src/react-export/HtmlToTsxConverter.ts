@@ -43,7 +43,7 @@ export class HtmlToTsxConverter {
     const bodyChildren = $("body").contents().toArray();
     const jsx = bodyChildren.map((node) => this.#nodeToTsx(node, route, 3)).filter(Boolean).join("\n");
 
-    return { route, jsx: jsx || "<main />", css };
+    return { route, jsx: jsx || "<main />", css, componentImports: [] };
   }
 
   #stripRuntime($: cheerio.CheerioAPI): void {
@@ -220,6 +220,4 @@ export class HtmlToTsxConverter {
     return "  ".repeat(depth);
   }
 }
-
-
 

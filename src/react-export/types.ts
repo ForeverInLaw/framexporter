@@ -24,4 +24,12 @@ export type ConvertedPage = {
   readonly route: ReactRouteSource;
   readonly jsx: string;
   readonly css: string;
+  readonly componentImports: string[];
+};
+
+export type SharedComponent = {
+  readonly name: string;
+  readonly fileName: string;
+  readonly body: string;
+  readonly occurrenceCount: number;
 };
