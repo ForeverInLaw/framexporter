@@ -78,6 +78,7 @@ export class AssetRewriter {
   collectTextAssetUrls(text: string, baseUrl: string): string[] {
     const urls = new Set(this.collectCssAssetUrls(text, baseUrl));
     this.#collectConstructedUrlAssets(text, baseUrl, urls);
+    this.#collectRelativeSpecifierAssets(text, baseUrl, urls);
     this.#collectEmbeddedAssetUrls(text, baseUrl, urls);
     return [...urls];
   }
@@ -151,8 +152,8 @@ export class AssetRewriter {
     const assets = [...this.archive.assets].sort((left, right) => right.sourceUrl.length - left.sourceUrl.length);
 
     for (const asset of assets) {
-      const relativePath = this.#relativeLocalPath(fromLocalPath, asset.localPath);
-      rewritten = this.#replaceUrlText(rewritten, asset.sourceUrl, relativePath);
+      const localPath = /\.(mjs|js)$/i.test(fromLocalPath) ? `/${asset.localPath}` : this.#relativeLocalPath(fromLocalPath, asset.localPath);
+      rewritten = this.#replaceUrlText(rewritten, asset.sourceUrl, localPath);
     }
 
 
@@ -258,6 +259,23 @@ export class AssetRewriter {
         if (match[0].includes(".href.replace")) {
           resolved = resolved.replace("/modules/", "/cms/");
         }
+        if (this.#isLikelyStaticAsset(resolved)) {
+          urls.add(resolved);
+        }
+      } catch {
+        continue;
+      }
+    }
+  }
+  #collectRelativeSpecifierAssets(text: string, baseUrl: string, urls: Set<string>): void {
+    for (const match of text.matchAll(/(["'`])((?:\.\.?\/|\/)[^"'`]+)\1/g)) {
+      const rawUrl = match[2];
+      if (this.#shouldIgnore(rawUrl)) {
+        continue;
+      }
+
+      try {
+        const resolved = new URL(rawUrl, baseUrl).toString();
         if (this.#isLikelyStaticAsset(resolved)) {
           urls.add(resolved);
         }

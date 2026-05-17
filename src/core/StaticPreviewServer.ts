@@ -1,4 +1,5 @@
 import { createReadStream } from "node:fs";
+import { open } from "node:fs/promises";
 import { stat } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import path from "node:path";
@@ -60,8 +61,8 @@ export class StaticPreviewServer {
     }
 
     const fileStat = await stat(resolved.filePath);
-    const range = this.#requestRange(request.url ?? "/", fileStat.size);
-    if (range === "invalid") {
+    const rangeRequest = this.#requestRange(request.url ?? "/", fileStat.size);
+    if (rangeRequest === "invalid") {
       response.writeHead(416, {
         "Content-Range": `bytes */${fileStat.size}`,
         "Content-Type": "text/plain; charset=utf-8",
@@ -70,19 +71,30 @@ export class StaticPreviewServer {
       return;
     }
 
-    const status = range ? 206 : resolved.status;
-    const contentLength = range ? range.end - range.start + 1 : fileStat.size;
     const headers: Record<string, string | number> = {
       "Content-Type": this.#contentType(resolved.filePath),
       "Cache-Control": "no-store",
       "Accept-Ranges": "bytes",
-      "Content-Length": contentLength,
     };
+
+    if (rangeRequest?.source === "query") {
+      const bodyLength = this.#rangeLength(rangeRequest.ranges);
+      response.writeHead(resolved.status, { ...headers, "Content-Length": bodyLength });
+      if (request.method === "HEAD") {
+        response.end();
+        return;
+      }
+      response.end(await this.#readRanges(resolved.filePath, rangeRequest.ranges));
+      return;
+    }
+
+    const range = rangeRequest?.ranges[0];
+    const status = range ? 206 : resolved.status;
+    const contentLength = range ? range.end - range.start + 1 : fileStat.size;
     if (range) {
       headers["Content-Range"] = `bytes ${range.start}-${range.end}/${fileStat.size}`;
     }
-
-    response.writeHead(status, headers);
+    response.writeHead(status, { ...headers, "Content-Length": contentLength });
 
     if (request.method === "HEAD") {
       response.end();
@@ -92,26 +104,58 @@ export class StaticPreviewServer {
     createReadStream(resolved.filePath, range ? { start: range.start, end: range.end } : undefined).pipe(response);
   }
 
-  #requestRange(rawUrl: string, fileSize: number): { start: number; end: number } | "invalid" | undefined {
+  #requestRange(rawUrl: string, fileSize: number): { source: "query" | "partial"; ranges: Array<{ start: number; end: number }> } | "invalid" | undefined {
     const parsed = new URL(rawUrl, "http://preview.local");
     const queryRange = parsed.searchParams.get("range");
-    const headerRange = queryRange ? undefined : parsed.searchParams.get("bytes");
-    const rawRange = queryRange ?? headerRange;
-    if (!rawRange) {
+    if (queryRange) {
+      const ranges = this.#parseRanges(queryRange, fileSize);
+      return ranges === "invalid" ? "invalid" : { source: "query", ranges };
+    }
+
+    const partialRange = parsed.searchParams.get("bytes");
+    if (!partialRange) {
       return undefined;
     }
 
-    const match = rawRange.match(/^(?:bytes=)?(\d+)-(\d+)$/i);
-    if (!match) {
-      return "invalid";
-    }
+    const ranges = this.#parseRanges(partialRange, fileSize);
+    return ranges === "invalid" || ranges.length !== 1 ? "invalid" : { source: "partial", ranges };
+  }
 
-    const start = Number(match[1]);
-    const end = Number(match[2]);
-    if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start > end || end >= fileSize) {
-      return "invalid";
+  #parseRanges(rawRange: string, fileSize: number): Array<{ start: number; end: number }> | "invalid" {
+    const ranges: Array<{ start: number; end: number }> = [];
+    for (const rawPart of rawRange.replace(/^bytes=/i, "").split(",")) {
+      const match = rawPart.trim().match(/^(\d+)-(\d+)$/);
+      if (!match) {
+        return "invalid";
+      }
+
+      const start = Number(match[1]);
+      const end = Number(match[2]);
+      if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start > end || end >= fileSize) {
+        return "invalid";
+      }
+      ranges.push({ start, end });
     }
-    return { start, end };
+    return ranges.length > 0 ? ranges : "invalid";
+  }
+
+  #rangeLength(ranges: Array<{ start: number; end: number }>): number {
+    return ranges.reduce((total, range) => total + range.end - range.start + 1, 0);
+  }
+
+  async #readRanges(filePath: string, ranges: Array<{ start: number; end: number }>): Promise<Buffer> {
+    const file = await open(filePath, "r");
+    try {
+      const chunks: Buffer[] = [];
+      for (const range of ranges) {
+        const buffer = Buffer.alloc(range.end - range.start + 1);
+        await file.read(buffer, 0, buffer.length, range.start);
+        chunks.push(buffer);
+      }
+      return Buffer.concat(chunks);
+    } finally {
+      await file.close();
+    }
   }
 
   async #resolveFile(requestPath: string): Promise<{ filePath: string; status: number } | undefined> {

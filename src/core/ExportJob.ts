@@ -91,11 +91,15 @@ export class ExportJob {
   }
 
   async #rewriteCapturedAssets(): Promise<void> {
-    for (const asset of this.#archive.assets) {
-      if (!this.#isTextAsset(asset.contentType, asset.localPath)) {
-        continue;
+    const processed = new Set<string>();
+
+    for (;;) {
+      const asset = this.#archive.assets.find((asset) => !processed.has(asset.sourceUrl) && this.#isTextAsset(asset.contentType, asset.localPath));
+      if (!asset) {
+        return;
       }
 
+      processed.add(asset.sourceUrl);
       const absolutePath = this.#absoluteOutputPath(asset.localPath);
       const text = await readFile(absolutePath, "utf8");
       await this.#fetcher.fetchMissing(this.#rewriter.collectTextAssetUrls(text, asset.sourceUrl));
