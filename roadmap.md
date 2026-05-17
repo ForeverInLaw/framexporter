@@ -12,7 +12,8 @@ Success criteria: a public page can be rendered, saved with assets, opened local
 - Playwright rendering for public pages.
 - Network asset capture for HTML, CSS, JS, images, fonts, SVG, and JSON.
 - Static URL discovery for `srcset`, inline styles, and stylesheet `url(...)` references.
-- Same-origin crawling with a conservative `--max-pages` limit.
+- Complete sitemap export by default, with optional `--max-pages` safety cap.
+- Sitemap seeding from `/sitemap.xml` for Framer routes that are not exposed as visible links.
 - HTML and CSS URL rewriting for common references.
 - Manifest report for saved and skipped resources.
 

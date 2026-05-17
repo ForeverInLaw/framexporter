@@ -7,7 +7,7 @@ type ParsedArgs = {
   readonly command: string | undefined;
   readonly url: string | undefined;
   readonly out: string;
-  readonly maxPages: number;
+  readonly maxPages: number | undefined;
   readonly waitMs: number;
 };
 
@@ -37,7 +37,7 @@ async function main(): Promise<void> {
 function parseArgs(argv: string[]): ParsedArgs {
   const [command, url, ...rest] = argv;
   let out = "exports/site";
-  let maxPages = 1;
+  let maxPages: number | undefined;
   let waitMs = 750;
 
   for (let index = 0; index < rest.length; index += 1) {
@@ -87,7 +87,7 @@ function parsePositiveInt(value: string, optionName: string): number {
 }
 
 function printHelp(): void {
-  console.log(`framexporter\n\nUsage:\n  framexporter export <url> [--out exports/site] [--max-pages 1] [--wait-ms 750]\n`);
+  console.log(`framexporter\n\nUsage:\n  framexporter export <url> [--out exports/site] [--max-pages N] [--wait-ms 750]\n`);
 }
 
 main().catch((error: unknown) => {

@@ -102,10 +102,35 @@ export class AssetRewriter {
   }
 
   rewriteCss(css: string, baseUrl: string, fromLocalPath: string): string {
-    return css.replace(/url\((['"]?)([^)'"\s]+)\1\)/gi, (match, quote: string, rawUrl: string) => {
+    return this.rewriteCapturedText(css, baseUrl, fromLocalPath).replace(/url\((['"]?)([^)'"\s]+)\1\)/gi, (match, quote: string, rawUrl: string) => {
       const rewritten = this.#rewriteSingleUrl(rawUrl, baseUrl, fromLocalPath);
       return rewritten ? `url(${quote}${rewritten}${quote})` : match;
     });
+  }
+
+  rewriteCapturedText(text: string, baseUrl: string, fromLocalPath: string): string {
+    let rewritten = text;
+    const assets = [...this.archive.assets].sort((left, right) => right.sourceUrl.length - left.sourceUrl.length);
+
+    for (const asset of assets) {
+      const relativePath = this.#relativeLocalPath(fromLocalPath, asset.localPath);
+      rewritten = rewritten.split(asset.sourceUrl).join(relativePath);
+      rewritten = rewritten.split(encodeURI(asset.sourceUrl)).join(relativePath);
+      rewritten = rewritten.split(asset.sourceUrl.replace(/&/g, "&amp;")).join(relativePath);
+    }
+
+    return this.#rewriteRelativeSpecifiers(rewritten, baseUrl, fromLocalPath);
+  }
+
+  collectExternalUrls(text: string): string[] {
+    const urls = new Set<string>();
+    for (const match of text.matchAll(/https?:\/\/[^\s"'<>\\)]+/gi)) {
+      const rawUrl = match[0].replace(/[.,;:]+$/g, "");
+      if (!this.archive.localPathFor(rawUrl) && !this.#isIgnorableExternalUrl(rawUrl)) {
+        urls.add(rawUrl);
+      }
+    }
+    return [...urls].sort();
   }
 
   #rewriteSingleUrl(rawUrl: string | undefined, baseUrl: string, fromLocalPath: string): string | undefined {
@@ -159,5 +184,23 @@ export class AssetRewriter {
     const fromDirectory = path.posix.dirname(fromLocalPath);
     const relative = path.posix.relative(fromDirectory, targetLocalPath);
     return relative.startsWith(".") ? relative : `./${relative}`;
+  }
+
+  #rewriteRelativeSpecifiers(text: string, baseUrl: string, fromLocalPath: string): string {
+    return text.replace(/(["'`])((?:\.\.?\/|\/)[^"'`]+)\1/g, (match, quote: string, rawUrl: string) => {
+      if (this.#shouldIgnore(rawUrl)) {
+        return match;
+      }
+
+      const absoluteUrl = new URL(rawUrl, baseUrl).toString();
+      const localPath = this.archive.localPathFor(absoluteUrl);
+      return localPath ? `${quote}${this.#relativeLocalPath(fromLocalPath, localPath)}${quote}` : match;
+    });
+  }
+
+  #isIgnorableExternalUrl(rawUrl: string): boolean {
+    return /^https?:\/\/(www\.w3\.org|example\.com)\b/i.test(rawUrl)
+      || /\.map(?:$|[?#])/i.test(rawUrl)
+      || /[`{}]/.test(rawUrl);
   }
 }

@@ -14,10 +14,10 @@
 ```bash
 npm install
 npm run build
-npm run export -- https://example.framer.website --out exports/example --max-pages 1
+npm run export -- https://example.framer.website --out exports/example
 ```
 
-The first tracer bullet exports one rendered page by default. Raise `--max-pages` to crawl same-origin links.
+The exporter reads `/sitemap.xml` when available, then crawls same-origin links. Use `--max-pages` only when you deliberately want to cap a large export.
 
 ## Output
 
@@ -28,4 +28,4 @@ exports/example/
   manifest.json
 ```
 
-`manifest.json` lists visited routes, saved assets, skipped responses, and warnings.
+`manifest.json` lists sitemap routes, visited routes, saved assets, skipped responses, remaining external URLs, and warnings.

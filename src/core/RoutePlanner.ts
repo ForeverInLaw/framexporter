@@ -29,6 +29,10 @@ export class RoutePlanner {
     return true;
   }
 
+  enqueueAll(urls: string[]): string[] {
+    return urls.filter((url) => this.enqueue(url));
+  }
+
   discover(html: string, pageUrl: string): string[] {
     const $ = cheerio.load(html);
     const links: string[] = [];
@@ -50,6 +54,10 @@ export class RoutePlanner {
   #normalize(rawUrl: string): string {
     const parsed = new URL(rawUrl);
     if (parsed.origin !== this.#startOrigin || !/^https?:$/i.test(parsed.protocol)) {
+      return "";
+    }
+
+    if (parsed.pathname.split("/").some((segment) => segment.startsWith(":"))) {
       return "";
     }
 

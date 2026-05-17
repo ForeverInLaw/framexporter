@@ -1,7 +1,7 @@
 export type ExportOptions = {
   readonly startUrl: URL;
   readonly outputDir: string;
-  readonly maxPages: number;
+  readonly maxPages: number | undefined;
   readonly waitMs: number;
 };
 
@@ -26,9 +26,11 @@ export type ExportedRoute = {
 export type ExportManifest = {
   readonly generatedAt: string;
   readonly startUrl: string;
+  readonly sitemapRoutes: string[];
   readonly routes: ExportedRoute[];
   readonly assets: CapturedAsset[];
   readonly skipped: SkippedAsset[];
+  readonly externalUrls: string[];
   readonly warnings: string[];
 };
 
