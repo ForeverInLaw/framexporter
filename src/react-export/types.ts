@@ -54,13 +54,27 @@ export type RuntimeComponentModel = {
   readonly rootClass?: string;
   readonly defaultVariant?: string;
   readonly variantClassMap: Readonly<Record<string, string>>;
+  readonly variantStyleTargets: readonly RuntimeVariantStyleTarget[];
   readonly transition?: Readonly<Record<string, string | number | boolean>>;
+  readonly enabledGestures: RuntimeEnabledGestures;
   readonly gestureCounts: {
     readonly whileHover: number;
     readonly whileTap: number;
     readonly hover: number;
     readonly tap: number;
   };
+};
+
+export type RuntimeEnabledGestures = {
+  readonly hover: boolean;
+  readonly tap: boolean;
+};
+
+export type RuntimeVariantStyleTarget = {
+  readonly variant: string;
+  readonly state: "hover" | "tap";
+  readonly targetClass: string;
+  readonly styles: Readonly<Record<string, string | number | boolean>>;
 };
 
 export type RuntimeChunkSummary = {

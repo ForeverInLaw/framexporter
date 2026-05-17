@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
-import type { FramerRuntimeAnalysis, RuntimeChunkSummary, RuntimeComponentModel, RuntimeMarkerCounts } from "./types.js";
+import type { FramerRuntimeAnalysis, RuntimeChunkSummary, RuntimeComponentModel, RuntimeMarkerCounts, RuntimeVariantStyleTarget } from "./types.js";
 
 const MARKER_PATTERNS: Record<keyof RuntimeMarkerCounts, RegExp[]> = {
   transitions: [/\btransition\b/gi, /\bduration\b/gi, /\bdelay\b/gi, /\bease\b/gi, /\bdamping\b/gi, /\bstiffness\b/gi],
@@ -15,6 +15,7 @@ const MARKER_PATTERNS: Record<keyof RuntimeMarkerCounts, RegExp[]> = {
 
 const COMPONENT_WINDOW_CHARS = 9_000;
 const MAX_COMPONENT_MODELS = 120;
+const INTERACTION_STYLE_KEYS = new Set(["backgroundColor", "color", "opacity", "scale", "scaleX", "scaleY", "x", "y", "rotate", "rotation"]);
 
 export class FramerRuntimeAnalyzer {
   constructor(private readonly inputDir: string) {}
@@ -81,9 +82,11 @@ export class FramerRuntimeAnalyzer {
       const windowStart = Math.max(0, match.index - COMPONENT_WINDOW_CHARS);
       const windowSource = source.slice(windowStart, match.index);
       const variantClassMap = this.#lastVariantClassMap(windowSource);
+      const variantStyleTargets = this.#variantStyleTargets(windowSource);
       const transition = this.#lastTransitionObject(windowSource);
       const rootClass = this.#lastBacktickMatch(windowSource, /`(framer-[A-Za-z0-9]+)`/g);
       const defaultVariant = this.#lastBacktickMatch(windowSource, /defaultVariant:`([^`]+)`/g);
+      const enabledGestures = this.#enabledGestures(windowSource, variantStyleTargets);
       const gestureCounts = this.#gestureCounts(windowSource);
       if (!rootClass && Object.keys(variantClassMap).length === 0) {
         continue;
@@ -99,7 +102,9 @@ export class FramerRuntimeAnalyzer {
         rootClass,
         defaultVariant,
         variantClassMap,
+        variantStyleTargets,
         transition,
+        enabledGestures,
         gestureCounts,
       });
     }
@@ -132,6 +137,97 @@ export class FramerRuntimeAnalyzer {
       transition[match[1]] = this.#parseRuntimeLiteral(match[2]);
     }
     return Object.keys(transition).length > 0 ? transition : undefined;
+  }
+
+  #variantStyleTargets(source: string): RuntimeVariantStyleTarget[] {
+    const targets: RuntimeVariantStyleTarget[] = [];
+    for (const variantsMatch of source.matchAll(/variants:\{/g)) {
+      const openIndex = variantsMatch.index + variantsMatch[0].length - 1;
+      const variantsObject = this.#readObjectAt(source, openIndex);
+      if (!variantsObject) {
+        continue;
+      }
+
+      const targetClass = this.#lastTargetClass(source.slice(Math.max(0, variantsMatch.index - 700), variantsMatch.index));
+      if (!targetClass) {
+        continue;
+      }
+
+      for (const stateMatch of variantsObject.body.matchAll(/"([^"]+)-(hover|tap)":\{/g)) {
+        const bodyOpenIndex = openIndex + 1 + stateMatch.index + stateMatch[0].length - 1;
+        const stateObject = this.#readObjectAt(source, bodyOpenIndex);
+        if (!stateObject) {
+          continue;
+        }
+
+        const styles = this.#interactionStyles(stateObject.body);
+        if (Object.keys(styles).length === 0) {
+          continue;
+        }
+
+        targets.push({
+          variant: stateMatch[1],
+          state: stateMatch[2] as "hover" | "tap",
+          targetClass,
+          styles,
+        });
+      }
+    }
+    return targets;
+  }
+
+  #interactionStyles(source: string): Record<string, string | number | boolean> {
+    const styles: Record<string, string | number | boolean> = {};
+    for (const match of source.matchAll(/(?:"([^"]+)"|([A-Za-z_$][\w$]*)):(`[^`]*`|-?\d+(?:\.\d+)?|!0|!1)/g)) {
+      const property = match[1] ?? match[2];
+      if (!property.startsWith("--") && !INTERACTION_STYLE_KEYS.has(property)) {
+        continue;
+      }
+      styles[property] = this.#parseRuntimeLiteral(match[3]);
+    }
+    return styles;
+  }
+
+  #readObjectAt(source: string, openIndex: number): { body: string; end: number } | undefined {
+    let depth = 0;
+    let quote: string | undefined;
+    for (let index = openIndex; index < source.length; index += 1) {
+      const char = source[index];
+      if (quote) {
+        if (char === "\\") {
+          index += 1;
+        } else if (char === quote) {
+          quote = undefined;
+        }
+        continue;
+      }
+      if (char === "`" || char === "\"" || char === "'") {
+        quote = char;
+        continue;
+      }
+      if (char === "{") {
+        depth += 1;
+      } else if (char === "}") {
+        depth -= 1;
+        if (depth === 0) {
+          return { body: source.slice(openIndex + 1, index), end: index };
+        }
+      }
+    }
+    return undefined;
+  }
+
+  #lastTargetClass(source: string): string | undefined {
+    const classNameMatch = [...source.matchAll(/className:`([^`]+)`/g)].at(-1)?.[1];
+    const classes = classNameMatch?.match(/framer-(?!v-)[a-z0-9]+/gi) ?? [];
+    return classes.at(-1);
+  }
+
+  #enabledGestures(source: string, styleTargets: readonly RuntimeVariantStyleTarget[]): RuntimeComponentModel["enabledGestures"] {
+    return {
+      hover: /hover:!0/.test(source) || styleTargets.some((target) => target.state === "hover"),
+      tap: /tap:!0/.test(source) || styleTargets.some((target) => target.state === "tap"),
+    };
   }
 
   #parseRuntimeLiteral(value: string): string | number | boolean {
