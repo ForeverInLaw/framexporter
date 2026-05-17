@@ -5,11 +5,13 @@ type BlockOccurrence = {
   readonly startLine: number;
   readonly endLine: number;
   readonly indent: string;
+  readonly values: string[];
 };
 
 type BlockCandidate = {
   readonly signature: string;
-  readonly body: string;
+  readonly template: string;
+  readonly slotKinds: string[];
   readonly lineCount: number;
   readonly charCount: number;
   readonly occurrences: BlockOccurrence[];
@@ -20,12 +22,27 @@ type OpenElement = {
   readonly startLine: number;
 };
 
-const MIN_BLOCK_LINES = 8;
-const MIN_BLOCK_CHARS = 280;
-const MIN_OCCURRENCES = 2;
-const MAX_COMPONENTS = 40;
+type SlotMatch = {
+  readonly start: number;
+  readonly end: number;
+  readonly literal: string;
+  readonly kind: string;
+};
 
-export class ComponentExtractor {
+type Replacement = BlockOccurrence & {
+  readonly component: SharedComponent;
+};
+
+const MIN_BLOCK_LINES = 5;
+const MIN_BLOCK_CHARS = 180;
+const MIN_OCCURRENCES = 3;
+const MAX_COMPONENTS = 24;
+const MAX_SLOTS = 10;
+const STRING_LITERAL_PATTERN = '"(?:\\\\.|[^"\\\\])*"';
+const TEXT_PATTERN = new RegExp(`^\\s*\\{(${STRING_LITERAL_PATTERN})\\}\\s*$`, "gm");
+const ATTR_PATTERN = new RegExp(`\\b(href|src|srcSet|alt|title|aria-label|placeholder|content)=\\{(${STRING_LITERAL_PATTERN})\\}`, "g");
+
+export class PropComponentExtractor {
   extract(pages: ConvertedPage[]): { pages: ConvertedPage[]; components: SharedComponent[] } {
     const candidates = this.#rankCandidates(this.#collectCandidates(pages));
     const selected = this.#selectReplacements(candidates, pages.length);
@@ -47,7 +64,8 @@ export class ComponentExtractor {
         candidates.set(block.signature, block);
       }
     });
-    return [...candidates.values()].filter((candidate) => candidate.occurrences.length >= MIN_OCCURRENCES);
+
+    return [...candidates.values()].filter((candidate) => this.#isUsefulCandidate(candidate));
   }
 
   #collectPageBlocks(jsx: string, pageIndex: number): BlockCandidate[] {
@@ -84,25 +102,78 @@ export class ComponentExtractor {
     }
 
     const body = this.#stripCommonIndent(blockLines);
-    if (body.length < MIN_BLOCK_CHARS || body.includes("<form ") || /<[A-Z][A-Za-z0-9]*/.test(body)) {
+    if (body.length < MIN_BLOCK_CHARS || body.includes("<form ")) {
+      return undefined;
+    }
+
+    const parameterized = this.#parameterize(body);
+    if (!parameterized || parameterized.values.length > MAX_SLOTS) {
       return undefined;
     }
 
     const firstLine = blockLines[0] ?? "";
     const indent = firstLine.match(/^\s*/)?.[0] ?? "";
     return {
-      signature: body,
-      body,
+      signature: parameterized.signature,
+      template: parameterized.template,
+      slotKinds: parameterized.kinds,
       lineCount: blockLines.length,
       charCount: body.length,
-      occurrences: [{ pageIndex, startLine, endLine, indent }],
+      occurrences: [{ pageIndex, startLine, endLine, indent, values: parameterized.values }],
     };
   }
 
+  #parameterize(body: string): { signature: string; template: string; kinds: string[]; values: string[] } | undefined {
+    const matches = this.#slotMatches(body);
+    if (matches.length === 0) {
+      return undefined;
+    }
+
+    let signature = body;
+    let template = body;
+    const kinds: string[] = [];
+    const values: string[] = [];
+
+    [...matches].reverse().forEach((match, reversedIndex) => {
+      const index = matches.length - reversedIndex - 1;
+      const marker = `__FRAMEPORTER_SLOT_${index}__`;
+      signature = `${signature.slice(0, match.start)}${marker}${signature.slice(match.end)}`;
+      template = `${template.slice(0, match.start)}${marker}${template.slice(match.end)}`;
+      kinds[index] = match.kind;
+      values[index] = match.literal;
+    });
+
+    return { signature, template, kinds, values };
+  }
+
+  #slotMatches(body: string): SlotMatch[] {
+    const matches: SlotMatch[] = [];
+    for (const match of body.matchAll(ATTR_PATTERN)) {
+      const literal = match[2];
+      const start = (match.index ?? 0) + match[0].lastIndexOf(literal);
+      matches.push({ start, end: start + literal.length, literal, kind: this.#propBaseName(match[1]) });
+    }
+
+    for (const match of body.matchAll(TEXT_PATTERN)) {
+      const literal = match[1];
+      const start = (match.index ?? 0) + match[0].indexOf(literal);
+      matches.push({ start, end: start + literal.length, literal, kind: "text" });
+    }
+
+    return matches.sort((left, right) => left.start - right.start).filter((match, index, all) => index === 0 || match.start >= all[index - 1].end);
+  }
+
+  #isUsefulCandidate(candidate: BlockCandidate): boolean {
+    if (candidate.occurrences.length < MIN_OCCURRENCES) {
+      return false;
+    }
+
+    const variableSlots = this.#variableSlotIndexes(candidate);
+    return variableSlots.length > 0 && variableSlots.length <= MAX_SLOTS;
+  }
+
   #rankCandidates(candidates: BlockCandidate[]): BlockCandidate[] {
-    return candidates
-      .filter((candidate) => candidate.occurrences.length >= MIN_OCCURRENCES)
-      .sort((left, right) => this.#benefit(right) - this.#benefit(left) || right.lineCount - left.lineCount);
+    return candidates.sort((left, right) => this.#benefit(right) - this.#benefit(left) || right.lineCount - left.lineCount);
   }
 
   #selectReplacements(candidates: BlockCandidate[], pageCount: number): BlockCandidate[] {
@@ -141,7 +212,7 @@ export class ComponentExtractor {
 
       const lines = page.jsx.split("\n");
       for (const replacement of replacements) {
-        lines.splice(replacement.startLine, replacement.endLine - replacement.startLine + 1, `${replacement.indent}<${replacement.component.name} />`);
+        lines.splice(replacement.startLine, replacement.endLine - replacement.startLine + 1, this.#componentCall(replacement));
       }
 
       return {
@@ -153,12 +224,64 @@ export class ComponentExtractor {
   }
 
   #toComponent(candidate: BlockCandidate, index: number): SharedComponent {
+    const variableIndexes = this.#variableSlotIndexes(candidate);
+    const propNames = this.#propNames(candidate, variableIndexes);
     return {
-      name: `GeneratedComponent${index}`,
-      fileName: `GeneratedComponent${index}.tsx`,
-      body: candidate.body,
+      name: `InferredComponent${index}`,
+      fileName: `InferredComponent${index}.tsx`,
+      body: this.#componentBody(candidate, variableIndexes, propNames),
       occurrenceCount: candidate.occurrences.length,
+      props: propNames,
+      propSlotIndexes: variableIndexes,
     };
+  }
+
+  #componentBody(candidate: BlockCandidate, variableIndexes: number[], propNames: string[]): string {
+    let body = candidate.template;
+    candidate.slotKinds.forEach((_, index) => {
+      const marker = `__FRAMEPORTER_SLOT_${index}__`;
+      const propIndex = variableIndexes.indexOf(index);
+      const replacement = propIndex >= 0 ? `props.${propNames[propIndex]}` : candidate.occurrences[0].values[index];
+      body = body.split(marker).join(replacement);
+    });
+    return body;
+  }
+
+  #componentCall(replacement: Replacement): string {
+    const props = replacement.component.props ?? [];
+    if (props.length === 0) {
+      return `${replacement.indent}<${replacement.component.name} />`;
+    }
+
+    const slotIndexes = replacement.component.propSlotIndexes ?? props.map((_, index) => index);
+    const assignments = props.map((propName, index) => `${propName}={${replacement.values[slotIndexes[index]]}}`).join(" ");
+    return `${replacement.indent}<${replacement.component.name} ${assignments} />`;
+  }
+
+  #variableSlotIndexes(candidate: BlockCandidate): number[] {
+    return candidate.slotKinds
+      .map((_, index) => index)
+      .filter((index) => new Set(candidate.occurrences.map((occurrence) => occurrence.values[index])).size > 1);
+  }
+
+  #propNames(candidate: BlockCandidate, variableIndexes: number[]): string[] {
+    const counts = new Map<string, number>();
+    return variableIndexes.map((index) => {
+      const baseName = candidate.slotKinds[index];
+      const count = (counts.get(baseName) ?? 0) + 1;
+      counts.set(baseName, count);
+      return count === 1 ? baseName : `${baseName}${count}`;
+    });
+  }
+
+  #propBaseName(attributeName: string): string {
+    if (attributeName === "aria-label") {
+      return "label";
+    }
+    if (attributeName === "srcSet") {
+      return "srcSet";
+    }
+    return attributeName;
   }
 
   #popMatchingElement(stack: OpenElement[], tagName: string): OpenElement | undefined {
@@ -196,3 +319,4 @@ export class ComponentExtractor {
     }
   }
 }
+

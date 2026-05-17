@@ -127,9 +127,12 @@ export class ViteReactProjectWriter {
   }
 
   async #writeSharedComponent(component: SharedComponent): Promise<void> {
+    const props = component.props ?? [];
+    const propsType = props.length > 0 ? `type Props = {\n${props.map((prop) => `  readonly ${prop}: string;`).join("\n")}\n};\n\n` : "";
+    const propsArgument = props.length > 0 ? "props: Props" : "";
     await this.#writeText(
       path.join("src", "components", component.fileName),
-      `${this.#reactTypeImport()}export function ${component.name}() {\n  return (\n    <>\n${this.#indentBody(component.body, 3)}\n    </>\n  );\n}\n`,
+      `${this.#reactTypeImport()}${propsType}export function ${component.name}(${propsArgument}) {\n  return (\n    <>\n${this.#indentBody(component.body, 3)}\n    </>\n  );\n}\n`,
     );
   }
 

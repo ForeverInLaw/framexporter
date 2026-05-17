@@ -22,7 +22,7 @@ Success criteria: a public page can be rendered, saved with assets, opened local
 - CLI command: `framexporter react [exports/site] --out exports-react/site`.
 - Input is an existing static export folder, not private Framer APIs.
 - Output is a Vite/React project with route components, copied assets, and generated CSS.
-- The first compiler pass preserves rendered structure and visual CSS.`n- Repeated exact JSX subtrees are extracted into shared generated components before semantic prop inference.
+- The first compiler pass preserves rendered structure and visual CSS.`n- Repeated exact JSX subtrees and conservative repeated JSX shapes are extracted into shared generated components with string props.
 
 ## Explicitly Out of Scope
 
@@ -35,7 +35,7 @@ Success criteria: a public page can be rendered, saved with assets, opened local
 ## Next Milestones
 
 1. Add screenshot comparison against the source URL and generated React export.
-2. Add prop inference and semantic names for repeated cards, nav items, and content sections.
+2. Add semantic names and richer prop inference for repeated cards, nav items, and content sections.
 3. Split generated React routes with dynamic imports to reduce initial bundle size.
 4. Add CSS source map and nested import handling.
 5. Add route-level warnings for forms and external runtime dependencies.

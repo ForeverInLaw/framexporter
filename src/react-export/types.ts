@@ -32,4 +32,6 @@ export type SharedComponent = {
   readonly fileName: string;
   readonly body: string;
   readonly occurrenceCount: number;
+  readonly props?: string[];
+  readonly propSlotIndexes?: number[];
 };

@@ -1,6 +1,7 @@
 import path from "node:path";
 import { ComponentExtractor } from "./ComponentExtractor.js";
 import { HtmlToTsxConverter } from "./HtmlToTsxConverter.js";
+import { PropComponentExtractor } from "./PropComponentExtractor.js";
 import { StaticExportReader } from "./StaticExportReader.js";
 import type { ConvertedPage, ReactExportOptions } from "./types.js";
 import { ViteReactProjectWriter } from "./ViteReactProjectWriter.js";
@@ -15,7 +16,8 @@ export type ReactExportResult = {
 export class ReactExportJob {
   readonly #reader: StaticExportReader;
   readonly #converter = new HtmlToTsxConverter();
-  readonly #extractor = new ComponentExtractor();
+  readonly #propExtractor = new PropComponentExtractor();
+  readonly #exactExtractor = new ComponentExtractor();
   readonly #writer: ViteReactProjectWriter;
   readonly #options: ReactExportOptions;
 
@@ -32,16 +34,18 @@ export class ReactExportJob {
     }
 
     const rawPages: ConvertedPage[] = source.routes.map((route) => this.#converter.convert(route));
-    const project = this.#extractor.extract(rawPages);
-    await this.#writer.write(project.pages, project.components);
+    const propProject = this.#propExtractor.extract(rawPages);
+    const exactProject = this.#exactExtractor.extract(propProject.pages);
+    const components = [...propProject.components, ...exactProject.components];
+    await this.#writer.write(exactProject.pages, components);
 
     return {
-      routes: project.pages.length,
-      components: project.components.length,
+      routes: exactProject.pages.length,
+      components: components.length,
       outputDir: this.#options.outputDir,
       warnings: [
         "Clean React export is experimental: complex Framer interactions, CMS queries, forms, ecommerce, and custom runtime animations are not reconstructed yet.",
-        "Generated components are exact repeated JSX subtrees; prop inference and semantic naming are planned as later compiler passes.",
+        "Generated components use conservative prop inference for repeated JSX shapes; semantic naming is planned as a later compiler pass.",
       ],
     };
   }
