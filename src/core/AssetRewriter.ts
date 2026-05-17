@@ -1,6 +1,7 @@
 import * as cheerio from "cheerio";
 import path from "node:path";
 import type { ResponseArchive } from "./ResponseArchive.js";
+import type { RoutePathMapper } from "./RoutePathMapper.js";
 
 const URL_ATTRIBUTES = [
   ["a", "href"],
@@ -16,7 +17,10 @@ const URL_ATTRIBUTES = [
 const ASSET_URL_ATTRIBUTES = URL_ATTRIBUTES.filter(([selector]) => selector !== "a" && selector !== "iframe");
 
 export class AssetRewriter {
-  constructor(private readonly archive: ResponseArchive) {}
+  constructor(
+    private readonly archive: ResponseArchive,
+    private readonly routes: RoutePathMapper,
+  ) {}
 
   collectHtmlAssetUrls(html: string, pageUrl: string): string[] {
     const $ = cheerio.load(html);
@@ -46,6 +50,14 @@ export class AssetRewriter {
       }
     });
 
+    $("script:not([src])").each((_, element) => {
+      this.#collectEmbeddedAssetUrls($(element).html() ?? "", pageUrl, urls);
+    });
+
+    $("[content]").each((_, element) => {
+      this.#collectEmbeddedAssetUrls($(element).attr("content") ?? "", pageUrl, urls);
+    });
+
     $("[style]").each((_, element) => {
       for (const rawUrl of this.collectCssAssetUrls($(element).attr("style") ?? "", pageUrl)) {
         urls.add(rawUrl);
@@ -63,6 +75,13 @@ export class AssetRewriter {
     return [...urls];
   }
 
+  collectTextAssetUrls(text: string, baseUrl: string): string[] {
+    const urls = new Set(this.collectCssAssetUrls(text, baseUrl));
+    this.#collectConstructedUrlAssets(text, baseUrl, urls);
+    this.#collectEmbeddedAssetUrls(text, baseUrl, urls);
+    return [...urls];
+  }
+
   rewriteHtml(html: string, pageUrl: string, routeLocalPath: string): string {
     const $ = cheerio.load(html);
 
@@ -76,6 +95,14 @@ export class AssetRewriter {
       });
     }
 
+    $("[content]").each((_, element) => {
+      const current = $(element).attr("content");
+      const rewritten = this.#rewriteSingleUrl(current, pageUrl, routeLocalPath);
+      if (rewritten) {
+        $(element).attr("content", rewritten);
+      }
+    });
+
     $("img[srcset], source[srcset]").each((_, element) => {
       const current = $(element).attr("srcset");
       const rewritten = this.#rewriteSrcSet(current, pageUrl, routeLocalPath);
@@ -88,6 +115,13 @@ export class AssetRewriter {
       const current = $(element).html();
       if (current) {
         $(element).html(this.rewriteCss(current, pageUrl, routeLocalPath));
+      }
+    });
+
+    $("script:not([src])").each((_, element) => {
+      const current = $(element).html();
+      if (current) {
+        $(element).text(this.rewriteCapturedText(current, pageUrl, routeLocalPath));
       }
     });
 
@@ -114,19 +148,19 @@ export class AssetRewriter {
 
     for (const asset of assets) {
       const relativePath = this.#relativeLocalPath(fromLocalPath, asset.localPath);
-      rewritten = rewritten.split(asset.sourceUrl).join(relativePath);
-      rewritten = rewritten.split(encodeURI(asset.sourceUrl)).join(relativePath);
-      rewritten = rewritten.split(asset.sourceUrl.replace(/&/g, "&amp;")).join(relativePath);
+      rewritten = this.#replaceUrlText(rewritten, asset.sourceUrl, relativePath);
     }
 
-    return this.#rewriteRelativeSpecifiers(rewritten, baseUrl, fromLocalPath);
+
+    const withLocalSpecifiers = this.#rewriteRelativeSpecifiers(rewritten, baseUrl, fromLocalPath);
+    return /\.(mjs|js)$/i.test(fromLocalPath) ? this.#repairRelativeNewUrlBases(withLocalSpecifiers) : withLocalSpecifiers;
   }
 
   collectExternalUrls(text: string): string[] {
     const urls = new Set<string>();
-    for (const match of text.matchAll(/https?:\/\/[^\s"'<>\\)]+/gi)) {
+    for (const match of text.matchAll(/https?:\/\/[^\s"'`<>\\)]+/gi)) {
       const rawUrl = match[0].replace(/[.,;:]+$/g, "");
-      if (!this.archive.localPathFor(rawUrl) && !this.#isIgnorableExternalUrl(rawUrl)) {
+      if (!this.archive.localPathFor(rawUrl) && !this.#isKnownRoute(rawUrl) && !this.#isIgnorableExternalUrl(rawUrl)) {
         urls.add(rawUrl);
       }
     }
@@ -138,9 +172,20 @@ export class AssetRewriter {
       return undefined;
     }
 
-    const absoluteUrl = new URL(rawUrl, baseUrl).toString();
+    let absoluteUrl: string;
+    try {
+      absoluteUrl = new URL(rawUrl, baseUrl).toString();
+    } catch {
+      return undefined;
+    }
+
     const localPath = this.archive.localPathFor(absoluteUrl);
-    return localPath ? this.#relativeLocalPath(fromLocalPath, localPath) : undefined;
+    if (localPath) {
+      return this.#relativeLocalPath(fromLocalPath, localPath);
+    }
+
+    const routeLocalPath = this.routes.localPathFor(rawUrl, baseUrl);
+    return routeLocalPath ? this.routes.hrefFor(fromLocalPath, routeLocalPath) : undefined;
   }
 
   #rewriteSrcSet(rawSrcSet: string | undefined, baseUrl: string, fromLocalPath: string): string | undefined {
@@ -170,7 +215,11 @@ export class AssetRewriter {
     if (!rawUrl || this.#shouldIgnore(rawUrl)) {
       return;
     }
-    urls.add(new URL(rawUrl, baseUrl).toString());
+    try {
+      urls.add(new URL(rawUrl, baseUrl).toString());
+    } catch {
+      return;
+    }
   }
 
   #parseSrcSetUrls(rawSrcSet: string | undefined): string[] {
@@ -180,10 +229,69 @@ export class AssetRewriter {
     return rawSrcSet.split(",").map((entry) => entry.trim().split(/\s+/)[0]).filter(Boolean);
   }
 
+  #collectEmbeddedAssetUrls(text: string, baseUrl: string, urls: Set<string>): void {
+    for (const match of text.matchAll(/https?:\/\/[^\s"'`<>\\)]+/gi)) {
+      const rawUrl = match[0].replace(/&amp;/g, "&").replace(/[.,;:]+$/g, "");
+      if (this.routes.localPathFor(rawUrl, baseUrl)) {
+        continue;
+      }
+      if (this.#isLikelyStaticAsset(rawUrl)) {
+        this.#collectSingleUrl(rawUrl, baseUrl, urls);
+      }
+    }
+  }
+
+  #collectConstructedUrlAssets(text: string, baseUrl: string, urls: Set<string>): void {
+    const newUrlPattern = /new URL\(\s*(["'`])([^"'`]+)\1\s*,\s*(["'`])([^"'`]+)\3\s*\)(?:\.href\.replace\(\s*(["'`])\/modules\/\5\s*,\s*(["'`])\/cms\/\6\s*\))?/g;
+
+    for (const match of text.matchAll(newUrlPattern)) {
+      try {
+        let resolved = new URL(match[2], new URL(match[4], baseUrl)).toString();
+        if (match[0].includes(".href.replace")) {
+          resolved = resolved.replace("/modules/", "/cms/");
+        }
+        if (this.#isLikelyStaticAsset(resolved)) {
+          urls.add(resolved);
+        }
+      } catch {
+        continue;
+      }
+    }
+  }
+
+  #isLikelyStaticAsset(rawUrl: string): boolean {
+    try {
+      const url = new URL(rawUrl);
+      return url.hostname === "framerusercontent.com"
+        || /\.(mjs|js|css|framercms|png|jpe?g|webp|gif|svg|ico|woff2?|ttf|otf|json)$/i.test(url.pathname);
+    } catch {
+      return false;
+    }
+  }
+
   #relativeLocalPath(fromLocalPath: string, targetLocalPath: string): string {
     const fromDirectory = path.posix.dirname(fromLocalPath);
     const relative = path.posix.relative(fromDirectory, targetLocalPath);
     return relative.startsWith(".") ? relative : `./${relative}`;
+  }
+
+  #replaceUrlText(text: string, sourceUrl: string, replacement: string): string {
+    return text
+      .split(sourceUrl).join(replacement)
+      .split(encodeURI(sourceUrl)).join(replacement)
+      .split(sourceUrl.replace(/&/g, "&amp;")).join(replacement);
+  }
+
+  #repairRelativeNewUrlBases(text: string): string {
+    return text.replace(
+      /new URL\(([^,\n]+),\s*(["'`])((?:\.\.?\/|\/)[^"'`]+)\2\)/g,
+      (match, input: string, quote: string, relativeBase: string) => {
+        if (/import\.meta\.url/.test(match)) {
+          return match;
+        }
+        return `new URL(${input},new URL(${quote}${relativeBase}${quote},import.meta.url))`;
+      },
+    );
   }
 
   #rewriteRelativeSpecifiers(text: string, baseUrl: string, fromLocalPath: string): string {
@@ -192,10 +300,30 @@ export class AssetRewriter {
         return match;
       }
 
-      const absoluteUrl = new URL(rawUrl, baseUrl).toString();
+      let absoluteUrl: string;
+      try {
+        absoluteUrl = new URL(rawUrl, baseUrl).toString();
+      } catch {
+        return match;
+      }
+
       const localPath = this.archive.localPathFor(absoluteUrl);
-      return localPath ? `${quote}${this.#relativeLocalPath(fromLocalPath, localPath)}${quote}` : match;
+      if (localPath) {
+        const replacementPath = /\.(mjs|js)$/i.test(fromLocalPath) ? `/${localPath}` : this.#relativeLocalPath(fromLocalPath, localPath);
+        return `${quote}${replacementPath}${quote}`;
+      }
+
+      const routeLocalPath = this.routes.localPathFor(rawUrl, baseUrl);
+      return routeLocalPath ? `${quote}${this.routes.hrefFor(fromLocalPath, routeLocalPath)}${quote}` : match;
     });
+  }
+
+  #isKnownRoute(rawUrl: string): boolean {
+    try {
+      return this.routes.localPathFor(rawUrl, rawUrl) !== undefined;
+    } catch {
+      return false;
+    }
   }
 
   #isIgnorableExternalUrl(rawUrl: string): boolean {
@@ -204,3 +332,4 @@ export class AssetRewriter {
       || /[`{}]/.test(rawUrl);
   }
 }
+

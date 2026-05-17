@@ -1,25 +1,38 @@
 #!/usr/bin/env node
 import path from "node:path";
 import { ExportJob } from "../core/ExportJob.js";
+import { StaticPreviewServer } from "../core/StaticPreviewServer.js";
 import type { ExportOptions } from "../core/types.js";
 
 type ParsedArgs = {
   readonly command: string | undefined;
-  readonly url: string | undefined;
+  readonly target: string | undefined;
   readonly out: string;
   readonly maxPages: number | undefined;
   readonly waitMs: number;
+  readonly host: string;
+  readonly port: number;
 };
 
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
-  if (args.command !== "export" || !args.url) {
-    printHelp();
-    process.exitCode = args.command ? 1 : 0;
+
+  if (args.command === "export" && args.target) {
+    await runExport(args);
     return;
   }
 
-  const options = buildOptions(args);
+  if (args.command === "preview") {
+    await runPreview(args);
+    return;
+  }
+
+  printHelp();
+  process.exitCode = args.command ? 1 : 0;
+}
+
+async function runExport(args: ParsedArgs): Promise<void> {
+  const options = buildExportOptions(args);
   const job = new ExportJob(options);
   const manifest = await job.run();
 
@@ -34,11 +47,32 @@ async function main(): Promise<void> {
   }
 }
 
+async function runPreview(args: ParsedArgs): Promise<void> {
+  const rootDir = path.resolve(args.target ?? args.out);
+  const server = new StaticPreviewServer({ rootDir, host: args.host, port: args.port });
+  const url = await server.start();
+
+  console.log(`Serving: ${rootDir}`);
+  console.log(`Preview: ${url}`);
+  console.log("Press Ctrl+C to stop.");
+
+  await new Promise<void>((resolve) => {
+    const stop = async () => {
+      await server.stop();
+      resolve();
+    };
+    process.once("SIGINT", stop);
+    process.once("SIGTERM", stop);
+  });
+}
+
 function parseArgs(argv: string[]): ParsedArgs {
-  const [command, url, ...rest] = argv;
+  const [command, target, ...rest] = argv;
   let out = "exports/site";
   let maxPages: number | undefined;
   let waitMs = 750;
+  let host = "127.0.0.1";
+  let port = 4173;
 
   for (let index = 0; index < rest.length; index += 1) {
     const token = rest[index];
@@ -52,20 +86,26 @@ function parseArgs(argv: string[]): ParsedArgs {
     } else if (token === "--wait-ms" && next) {
       waitMs = parsePositiveInt(next, "--wait-ms");
       index += 1;
+    } else if (token === "--host" && next) {
+      host = next;
+      index += 1;
+    } else if (token === "--port" && next) {
+      port = parsePositiveInt(next, "--port");
+      index += 1;
     } else {
       throw new Error(`Unknown or incomplete option: ${token}`);
     }
   }
 
-  return { command, url, out, maxPages, waitMs };
+  return { command, target, out, maxPages, waitMs, host, port };
 }
 
-function buildOptions(args: ParsedArgs): ExportOptions {
-  if (!args.url) {
+function buildExportOptions(args: ParsedArgs): ExportOptions {
+  if (!args.target) {
     throw new Error("URL is required.");
   }
 
-  const startUrl = new URL(args.url);
+  const startUrl = new URL(args.target);
   if (!/^https?:$/i.test(startUrl.protocol)) {
     throw new Error("Only public http/https URLs are supported.");
   }
@@ -87,7 +127,7 @@ function parsePositiveInt(value: string, optionName: string): number {
 }
 
 function printHelp(): void {
-  console.log(`framexporter\n\nUsage:\n  framexporter export <url> [--out exports/site] [--max-pages N] [--wait-ms 750]\n`);
+  console.log(`framexporter\n\nUsage:\n  framexporter export <url> [--out exports/site] [--max-pages N] [--wait-ms 750]\n  framexporter preview [exports/site] [--host 127.0.0.1] [--port 4173]\n`);
 }
 
 main().catch((error: unknown) => {

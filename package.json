@@ -9,7 +9,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "start": "node dist/cli/main.js",
-    "export": "node dist/cli/main.js export"
+    "export": "node dist/cli/main.js export",
+    "preview": "node dist/cli/main.js preview"
   },
   "keywords": [
     "framer",

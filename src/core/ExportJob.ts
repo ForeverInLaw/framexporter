@@ -4,6 +4,7 @@ import { AssetFetcher } from "./AssetFetcher.js";
 import { AssetRewriter } from "./AssetRewriter.js";
 import { BrowserRenderer } from "./BrowserRenderer.js";
 import { ResponseArchive } from "./ResponseArchive.js";
+import { RoutePathMapper } from "./RoutePathMapper.js";
 import { RoutePlanner } from "./RoutePlanner.js";
 import { SitemapDiscoverer } from "./SitemapDiscoverer.js";
 import type { ExportManifest, ExportOptions, ExportedRoute } from "./types.js";
@@ -14,6 +15,7 @@ export class ExportJob {
   readonly #fetcher: AssetFetcher;
   readonly #rewriter: AssetRewriter;
   readonly #renderer: BrowserRenderer;
+  readonly #routePaths: RoutePathMapper;
   readonly #sitemapDiscoverer = new SitemapDiscoverer();
   readonly #warnings: string[] = [];
 
@@ -21,14 +23,18 @@ export class ExportJob {
     this.#options = options;
     this.#archive = new ResponseArchive(options.outputDir);
     this.#fetcher = new AssetFetcher(this.#archive);
-    this.#rewriter = new AssetRewriter(this.#archive);
+    this.#routePaths = new RoutePathMapper(options.startUrl);
+    this.#rewriter = new AssetRewriter(this.#archive, this.#routePaths);
     this.#renderer = new BrowserRenderer(this.#archive, { waitMs: options.waitMs });
   }
 
   async run(): Promise<ExportManifest> {
     await mkdir(this.#options.outputDir, { recursive: true });
     const planner = new RoutePlanner(this.#options.startUrl);
-    const sitemapRoutes = planner.enqueueAll(await this.#sitemapDiscoverer.discover(this.#options.startUrl));
+    this.#routePaths.register(this.#options.startUrl.toString());
+    const discoveredSitemapUrls = await this.#sitemapDiscoverer.discover(this.#options.startUrl);
+    this.#routePaths.registerAll(discoveredSitemapUrls);
+    const sitemapRoutes = planner.enqueueAll(discoveredSitemapUrls);
     const routes: ExportedRoute[] = [];
 
     await this.#renderer.start();
@@ -42,9 +48,10 @@ export class ExportJob {
         planner.markVisited(nextUrl);
         const rendered = await this.#renderer.render(nextUrl);
         const discoveredLinks = planner.discover(rendered.html, rendered.url);
+        this.#routePaths.registerAll(discoveredLinks);
         const staticUrls = this.#rewriter.collectHtmlAssetUrls(rendered.html, rendered.url);
         await this.#fetcher.fetchMissing(staticUrls);
-        const localPath = this.#routePath(nextUrl);
+        const localPath = this.#routePaths.register(nextUrl) ?? "index.html";
         const rewrittenHtml = this.#rewriter.rewriteHtml(rendered.html, rendered.url, localPath);
         await this.#writeRoute(localPath, rewrittenHtml);
 
@@ -91,7 +98,7 @@ export class ExportJob {
 
       const absolutePath = path.join(this.#options.outputDir, ...asset.localPath.split("/"));
       const text = await readFile(absolutePath, "utf8");
-      await this.#fetcher.fetchMissing(this.#rewriter.collectCssAssetUrls(text, asset.sourceUrl));
+      await this.#fetcher.fetchMissing(this.#rewriter.collectTextAssetUrls(text, asset.sourceUrl));
       const rewritten = /text\/css/i.test(asset.contentType)
         ? this.#rewriter.rewriteCss(text, asset.sourceUrl, asset.localPath)
         : this.#rewriter.rewriteCapturedText(text, asset.sourceUrl, asset.localPath);
@@ -101,29 +108,6 @@ export class ExportJob {
 
   #isTextAsset(contentType: string, localPath: string): boolean {
     return /text\/css|javascript|application\/json|manifest\+json/i.test(contentType) || /\.(js|mjs|css|json)$/i.test(localPath);
-  }
-
-  #routePath(rawUrl: string): string {
-    const parsed = new URL(rawUrl);
-    const cleanSegments = parsed.pathname.split("/").filter(Boolean).map((segment) => this.#safeRouteSegment(segment));
-    if (cleanSegments.length === 0) {
-      return "index.html";
-    }
-
-    const cleanPath = cleanSegments.join("/");
-    const extension = path.posix.extname(cleanPath);
-    if (extension && extension !== ".") {
-      return cleanPath;
-    }
-
-    return `${cleanPath}/index.html`;
-  }
-
-  #safeRouteSegment(segment: string): string {
-    return decodeURIComponent(segment)
-      .replace(/[<>:"\\|?*\x00-\x1F]+/g, "-")
-      .replace(/[. ]+$/g, "")
-      .replace(/^-+|-+$/g, "") || "route";
   }
 
   #addRuntimeWarnings(): void {
@@ -169,3 +153,4 @@ export class ExportJob {
     return files;
   }
 }
+
