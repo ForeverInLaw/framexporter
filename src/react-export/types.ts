@@ -47,6 +47,22 @@ export type RuntimeMarkerCounts = {
   readonly cms: number;
 };
 
+export type RuntimeComponentModel = {
+  readonly chunkPath: string;
+  readonly symbol: string;
+  readonly displayName: string;
+  readonly rootClass?: string;
+  readonly defaultVariant?: string;
+  readonly variantClassMap: Readonly<Record<string, string>>;
+  readonly transition?: Readonly<Record<string, string | number | boolean>>;
+  readonly gestureCounts: {
+    readonly whileHover: number;
+    readonly whileTap: number;
+    readonly hover: number;
+    readonly tap: number;
+  };
+};
+
 export type RuntimeChunkSummary = {
   readonly path: string;
   readonly bytes: number;
@@ -54,6 +70,7 @@ export type RuntimeChunkSummary = {
   readonly score: number;
   readonly markers: RuntimeMarkerCounts;
   readonly samples: readonly string[];
+  readonly componentModels: readonly RuntimeComponentModel[];
 };
 
 export type FramerRuntimeAnalysis = {
@@ -62,4 +79,5 @@ export type FramerRuntimeAnalysis = {
   readonly totalBytes: number;
   readonly markerTotals: RuntimeMarkerCounts;
   readonly chunks: readonly RuntimeChunkSummary[];
+  readonly componentModels: readonly RuntimeComponentModel[];
 };

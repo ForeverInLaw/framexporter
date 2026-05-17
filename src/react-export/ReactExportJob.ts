@@ -56,7 +56,7 @@ export class ReactExportJob {
       warnings: [
         "Clean React export is experimental: complex Framer interactions, CMS queries, forms, ecommerce, and custom runtime animations are not reconstructed yet.",
         "React export is generated from hydrated browser DOM snapshots; Framer appear animations are approximated with a small GSAP runtime.",
-        `Framer runtime analysis found ${runtimeAnalysis.chunkCount} unique module chunk(s); inspect framexporter-runtime-analysis.json for 1:1 conversion targets.`,
+        `${runtimeAnalysis.chunkCount} Framer runtime chunk(s) and ${runtimeAnalysis.componentModels.length} component model candidate(s) were analyzed; inspect framexporter-runtime-analysis.json for 1:1 conversion targets.`,
       ],
     };
   }
