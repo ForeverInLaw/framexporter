@@ -6,7 +6,7 @@ Core problem: a site owner needs a local backup of their published Framer websit
 
 Success criteria: a public page can be rendered, saved with assets, opened locally, and audited through a manifest.
 
-## In Scope
+## Static Export Scope
 
 - CLI command: `framexporter export <url>`.
 - Playwright rendering for public pages.
@@ -17,17 +17,25 @@ Success criteria: a public page can be rendered, saved with assets, opened local
 - HTML and CSS URL rewriting for common references.
 - Manifest report for saved and skipped resources.
 
+## Experimental React Export Scope
+
+- CLI command: `framexporter react [exports/site] --out exports-react/site`.
+- Input is an existing static export folder, not private Framer APIs.
+- Output is a Vite/React project with route components, copied assets, and generated CSS.
+- The first compiler pass preserves rendered structure and visual CSS before attempting semantic component inference.
+
 ## Explicitly Out of Scope
 
 - Private dashboard export.
 - Login bypass, password bypass, or scraping sites the user does not own.
-- Framer-to-React or Framer-to-Next conversion.
 - Reimplementation of forms, CMS mutations, ecommerce, auth, search, or analytics backends.
+- Full Framer animation/runtime reconstruction in the first React export pass.
 - Visual editor or browser extension.
 
 ## Next Milestones
 
-1. Add local preview command with a static server.
-2. Add screenshot comparison against the source URL.
-3. Add CSS source map and nested import handling.
-4. Add route-level warnings for forms and external runtime dependencies.
+1. Add screenshot comparison against the source URL and generated React export.
+2. Add component inference for repeated cards, nav items, and content sections.
+3. Split generated React routes with dynamic imports to reduce initial bundle size.
+4. Add CSS source map and nested import handling.
+5. Add route-level warnings for forms and external runtime dependencies.

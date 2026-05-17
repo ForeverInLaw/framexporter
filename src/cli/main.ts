@@ -6,6 +6,8 @@ import { stdin as input, stdout as output } from "node:process";
 import { ExportJob } from "../core/ExportJob.js";
 import { StaticPreviewServer } from "../core/StaticPreviewServer.js";
 import type { ExportOptions } from "../core/types.js";
+import { ReactExportJob } from "../react-export/ReactExportJob.js";
+import type { ReactExportOptions } from "../react-export/types.js";
 
 type ParsedArgs = {
   readonly command: string | undefined;
@@ -16,6 +18,7 @@ type ParsedArgs = {
   readonly waitMs: number;
   readonly host: string;
   readonly port: number;
+  readonly appName: string | undefined;
 };
 
 async function main(): Promise<void> {
@@ -23,6 +26,11 @@ async function main(): Promise<void> {
 
   if (args.command === "export" && args.target) {
     await runExport(args);
+    return;
+  }
+
+  if (args.command === "react") {
+    await runReactExport(args);
     return;
   }
 
@@ -51,6 +59,22 @@ async function runExport(args: ParsedArgs): Promise<void> {
   }
 }
 
+async function runReactExport(args: ParsedArgs): Promise<void> {
+  const inputDir = path.resolve(args.target ?? await chooseExportDirectory(args.exportsDir));
+  const options = buildReactExportOptions(args, inputDir);
+  const job = new ReactExportJob(options);
+  const result = await job.run();
+
+  console.log(`Generated ${result.routes} React route component(s).`);
+  console.log(`Output: ${result.outputDir}`);
+  if (result.warnings.length > 0) {
+    console.log("Warnings:");
+    for (const warning of result.warnings) {
+      console.log(`- ${warning}`);
+    }
+  }
+}
+
 async function runPreview(args: ParsedArgs): Promise<void> {
   const rootDir = path.resolve(args.target ?? await chooseExportDirectory(args.exportsDir));
   const server = new StaticPreviewServer({ rootDir, host: args.host, port: args.port });
@@ -73,12 +97,13 @@ async function runPreview(args: ParsedArgs): Promise<void> {
 function parseArgs(argv: string[]): ParsedArgs {
   const [command, ...tokens] = argv;
   let target: string | undefined;
-  let out = "exports/site";
+  let out = command === "react" ? "exports-react/site" : "exports/site";
   let exportsDir = "exports";
   let maxPages: number | undefined;
   let waitMs = 750;
   let host = "127.0.0.1";
   let port = 4173;
+  let appName: string | undefined;
 
   for (let index = 0; index < tokens.length; index += 1) {
     const token = tokens[index];
@@ -88,6 +113,9 @@ function parseArgs(argv: string[]): ParsedArgs {
       index += 1;
     } else if (token === "--exports-dir" && next) {
       exportsDir = next;
+      index += 1;
+    } else if (token === "--app-name" && next) {
+      appName = next;
       index += 1;
     } else if (token === "--max-pages" && next) {
       maxPages = parsePositiveInt(next, "--max-pages");
@@ -108,7 +136,7 @@ function parseArgs(argv: string[]): ParsedArgs {
     }
   }
 
-  return { command, target, out, exportsDir, maxPages, waitMs, host, port };
+  return { command, target, out, exportsDir, maxPages, waitMs, host, port, appName };
 }
 
 type ExportDirectoryChoice = {
@@ -140,7 +168,7 @@ async function chooseExportDirectory(exportsDir: string): Promise<string> {
   const rl = createInterface({ input, output });
   try {
     for (;;) {
-      const answer = await rl.question("Choose export to preview: ");
+      const answer = await rl.question("Choose export to preview/convert: ");
       const selected = Number.parseInt(answer.trim(), 10);
       if (Number.isInteger(selected) && selected >= 1 && selected <= choices.length) {
         return choices[selected - 1].path;
@@ -198,6 +226,7 @@ async function hasIndexHtml(exportPath: string): Promise<boolean> {
     return false;
   }
 }
+
 function buildExportOptions(args: ParsedArgs): ExportOptions {
   if (!args.target) {
     throw new Error("URL is required.");
@@ -216,6 +245,18 @@ function buildExportOptions(args: ParsedArgs): ExportOptions {
   };
 }
 
+function buildReactExportOptions(args: ParsedArgs, inputDir: string): ReactExportOptions {
+  return {
+    inputDir,
+    outputDir: path.resolve(args.out),
+    appName: normalizePackageName(args.appName ?? path.basename(path.resolve(args.out))),
+  };
+}
+
+function normalizePackageName(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "") || "framexporter-react-export";
+}
+
 function parsePositiveInt(value: string, optionName: string): number {
   const parsed = Number.parseInt(value, 10);
   if (!Number.isFinite(parsed) || parsed < 1) {
@@ -225,7 +266,7 @@ function parsePositiveInt(value: string, optionName: string): number {
 }
 
 function printHelp(): void {
-  console.log(`framexporter\n\nUsage:\n  framexporter export <url> [--out exports/site] [--max-pages N] [--wait-ms 750]\n  framexporter preview [exports/site] [--exports-dir exports] [--host 127.0.0.1] [--port 4173]\n`);
+  console.log(`framexporter\n\nUsage:\n  framexporter export <url> [--out exports/site] [--max-pages N] [--wait-ms 750]\n  framexporter preview [exports/site] [--exports-dir exports] [--host 127.0.0.1] [--port 4173]\n  framexporter react [exports/site] [--out exports-react/site] [--exports-dir exports] [--app-name name]\n`);
 }
 
 main().catch((error: unknown) => {

@@ -11,7 +11,8 @@
     "start": "node dist/cli/main.js",
     "export": "node dist/cli/main.js export",
     "preview": "node dist/cli/main.js preview",
-    "dev": "node dist/cli/main.js preview"
+    "dev": "node dist/cli/main.js preview",
+    "export:react": "node dist/cli/main.js react"
   },
   "keywords": [
     "framer",
