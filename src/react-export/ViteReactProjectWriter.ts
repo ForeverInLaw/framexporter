@@ -1,11 +1,11 @@
 import { cp, mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
-import type { ConvertedPage, ReactExportOptions, ReactRouteSource, SharedComponent } from "./types.js";
+import type { ConvertedPage, FramerRuntimeAnalysis, ReactExportOptions, ReactRouteSource, SharedComponent } from "./types.js";
 
 export class ViteReactProjectWriter {
   constructor(private readonly options: ReactExportOptions) {}
 
-  async write(pages: ConvertedPage[], components: SharedComponent[]): Promise<void> {
+  async write(pages: ConvertedPage[], components: SharedComponent[], runtimeAnalysis: FramerRuntimeAnalysis): Promise<void> {
     await rm(this.options.outputDir, { recursive: true, force: true });
     await mkdir(path.join(this.options.outputDir, "src", "components"), { recursive: true });
     await mkdir(path.join(this.options.outputDir, "src", "motion"), { recursive: true });
@@ -23,6 +23,7 @@ export class ViteReactProjectWriter {
       this.#writeViteEnv(),
       this.#writeFavicon(),
       this.#writeMotionRuntime(),
+      this.#writeRuntimeAnalysis(runtimeAnalysis),
       this.#writeApp(pages.map((page) => page.route)),
       this.#writeCss(pages),
       ...pages.map((page) => this.#writePage(page)),
@@ -107,6 +108,10 @@ export class ViteReactProjectWriter {
 
   async #writeFavicon(): Promise<void> {
     await this.#writeText(path.join("public", "favicon.ico"), "");
+  }
+
+  async #writeRuntimeAnalysis(runtimeAnalysis: FramerRuntimeAnalysis): Promise<void> {
+    await this.#writeJson("framexporter-runtime-analysis.json", runtimeAnalysis);
   }
 
   async #writeMotionRuntime(): Promise<void> {

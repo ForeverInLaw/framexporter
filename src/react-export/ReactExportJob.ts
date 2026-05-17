@@ -1,5 +1,6 @@
 import path from "node:path";
 import { ComponentExtractor } from "./ComponentExtractor.js";
+import { FramerRuntimeAnalyzer } from "./FramerRuntimeAnalyzer.js";
 import { HtmlToTsxConverter } from "./HtmlToTsxConverter.js";
 import { HydratedRouteSnapshotter } from "./HydratedRouteSnapshotter.js";
 import { PropComponentExtractor } from "./PropComponentExtractor.js";
@@ -18,6 +19,7 @@ export type ReactExportResult = {
 export class ReactExportJob {
   readonly #reader: StaticExportReader;
   readonly #snapshotter: HydratedRouteSnapshotter;
+  readonly #runtimeAnalyzer: FramerRuntimeAnalyzer;
   readonly #converter = new HtmlToTsxConverter();
   readonly #propExtractor = new PropComponentExtractor();
   readonly #exactExtractor = new ComponentExtractor();
@@ -29,6 +31,7 @@ export class ReactExportJob {
     this.#options = options;
     this.#reader = new StaticExportReader(options.inputDir);
     this.#snapshotter = new HydratedRouteSnapshotter({ rootDir: options.inputDir });
+    this.#runtimeAnalyzer = new FramerRuntimeAnalyzer(options.inputDir);
     this.#writer = new ViteReactProjectWriter(options);
   }
 
@@ -38,12 +41,13 @@ export class ReactExportJob {
       throw new Error(`No HTML routes found in ${path.resolve(this.#options.inputDir)}.`);
     }
 
+    const runtimeAnalysis = await this.#runtimeAnalyzer.analyze();
     const hydratedRoutes = await this.#snapshotter.snapshot(source.routes);
     const rawPages: ConvertedPage[] = hydratedRoutes.map((route) => this.#converter.convert(route));
     const propProject = this.#propExtractor.extract(rawPages);
     const exactProject = this.#exactExtractor.extract(propProject.pages);
     const namedProject = this.#namer.rename(exactProject.pages, [...propProject.components, ...exactProject.components]);
-    await this.#writer.write(namedProject.pages, namedProject.components);
+    await this.#writer.write(namedProject.pages, namedProject.components, runtimeAnalysis);
 
     return {
       routes: namedProject.pages.length,
@@ -52,6 +56,7 @@ export class ReactExportJob {
       warnings: [
         "Clean React export is experimental: complex Framer interactions, CMS queries, forms, ecommerce, and custom runtime animations are not reconstructed yet.",
         "React export is generated from hydrated browser DOM snapshots; Framer appear animations are approximated with a small GSAP runtime.",
+        `Framer runtime analysis found ${runtimeAnalysis.chunkCount} unique module chunk(s); inspect framexporter-runtime-analysis.json for 1:1 conversion targets.`,
       ],
     };
   }

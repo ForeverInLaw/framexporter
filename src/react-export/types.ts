@@ -36,3 +36,30 @@ export type SharedComponent = {
   readonly propSlotIndexes?: number[];
   readonly propSamples?: readonly string[][];
 };
+
+export type RuntimeMarkerCounts = {
+  readonly transitions: number;
+  readonly variants: number;
+  readonly gestures: number;
+  readonly scroll: number;
+  readonly slideshows: number;
+  readonly forms: number;
+  readonly cms: number;
+};
+
+export type RuntimeChunkSummary = {
+  readonly path: string;
+  readonly bytes: number;
+  readonly sha1: string;
+  readonly score: number;
+  readonly markers: RuntimeMarkerCounts;
+  readonly samples: readonly string[];
+};
+
+export type FramerRuntimeAnalysis = {
+  readonly version: 1;
+  readonly chunkCount: number;
+  readonly totalBytes: number;
+  readonly markerTotals: RuntimeMarkerCounts;
+  readonly chunks: readonly RuntimeChunkSummary[];
+};
