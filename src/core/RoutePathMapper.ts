@@ -34,7 +34,14 @@ export class RoutePathMapper {
       return undefined;
     }
 
-    const normalized = this.#normalize(new URL(rawUrl, baseUrl).toString());
+    let resolvedUrl: string;
+    try {
+      resolvedUrl = new URL(rawUrl, baseUrl).toString();
+    } catch {
+      return undefined;
+    }
+
+    const normalized = this.#normalize(resolvedUrl);
     return normalized ? this.#routes.get(normalized) : undefined;
   }
 

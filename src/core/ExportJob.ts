@@ -7,7 +7,7 @@ import { ResponseArchive } from "./ResponseArchive.js";
 import { RoutePathMapper } from "./RoutePathMapper.js";
 import { RoutePlanner } from "./RoutePlanner.js";
 import { SitemapDiscoverer } from "./SitemapDiscoverer.js";
-import type { ExportManifest, ExportOptions, ExportedRoute } from "./types.js";
+import type { CapturedAsset, ExportManifest, ExportOptions, ExportedRoute } from "./types.js";
 
 export class ExportJob {
   readonly #options: ExportOptions;
@@ -100,6 +100,10 @@ export class ExportJob {
       }
 
       processed.add(asset.sourceUrl);
+      if (!this.#shouldRewriteAssetText(asset)) {
+        continue;
+      }
+
       const absolutePath = this.#absoluteOutputPath(asset.localPath);
       const text = await readFile(absolutePath, "utf8");
       await this.#fetcher.fetchMissing(this.#rewriter.collectTextAssetUrls(text, asset.sourceUrl));
@@ -118,6 +122,20 @@ export class ExportJob {
 
   #absoluteOutputPath(localPath: string): string {
     return path.join(this.#options.outputDir, ...localPath.split("/"));
+  }
+
+  #shouldRewriteAssetText(asset: CapturedAsset): boolean {
+    try {
+      const host = new URL(asset.sourceUrl).host;
+      return host !== "app.framerstatic.com" && host !== "framer.com";
+    } catch {
+      return false;
+    }
+  }
+
+  #shouldSkipTextScanDirectory(directoryPath: string): boolean {
+    const relativePath = path.relative(this.#options.outputDir, directoryPath).replace(/\\/g, "/");
+    return relativePath === "assets/app.framerstatic.com" || relativePath === "assets/framer.com";
   }
 
   #isTextAsset(contentType: string, localPath: string): boolean {
@@ -158,6 +176,9 @@ export class ExportJob {
     for (const entry of entries) {
       const entryPath = path.join(directory, entry.name);
       if (entry.isDirectory()) {
+        if (this.#shouldSkipTextScanDirectory(entryPath)) {
+          continue;
+        }
         files.push(...(await this.#listTextFiles(entryPath)));
       } else if (/\.(html|css|js|mjs|json)$/i.test(entry.name)) {
         files.push(entryPath);

@@ -98,7 +98,8 @@ async function runPreview(args: ParsedArgs): Promise<void> {
 }
 
 function parseArgs(argv: string[]): ParsedArgs {
-  const [command, ...tokens] = argv;
+  const normalizedArgv = normalizeRunArgs(argv);
+  const [command, ...tokens] = normalizedArgv;
   let target: string | undefined;
   let out: string | undefined;
   let exportsDir = "exports";
@@ -146,6 +147,30 @@ function parseArgs(argv: string[]): ParsedArgs {
   }
 
   return { command, target, out, exportsDir, maxPages, waitMs, host, port, appName, motionMode };
+}
+
+function normalizeRunArgs(argv: string[]): string[] {
+  if (argv.length === 0) {
+    return argv;
+  }
+
+  const [command, ...tokens] = argv;
+  if ((command === "export" || command === "react" || command === "preview") && tokens.length > 0) {
+    return argv;
+  }
+  if (isHttpUrl(command)) {
+    return ["export", ...argv];
+  }
+  return argv;
+}
+
+function isHttpUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
 }
 
 type ExportDirectoryChoice = {
@@ -241,7 +266,7 @@ function buildExportOptions(args: ParsedArgs): ExportOptions {
     throw new Error("URL is required.");
   }
 
-  const startUrl = new URL(args.target);
+  const startUrl = parseStartUrl(args.target);
   if (!/^https?:$/i.test(startUrl.protocol)) {
     throw new Error("Only public http/https URLs are supported.");
   }
@@ -278,6 +303,14 @@ function parseMotionMode(value: string): ReactMotionMode {
 function isMotionModeValue(value: string): boolean {
   const normalized = value.toLowerCase();
   return normalized === "none" || normalized === "off" || normalized === "false" || normalized === "approximate" || normalized === "approx" || normalized === "gsap";
+}
+
+function parseStartUrl(value: string): URL {
+  try {
+    return new URL(value);
+  } catch {
+    throw new Error(`Invalid URL: ${value}`);
+  }
 }
 
 function defaultExportOutputDir(startUrl: URL): string {
