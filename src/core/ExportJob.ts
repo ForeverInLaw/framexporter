@@ -96,14 +96,24 @@ export class ExportJob {
         continue;
       }
 
-      const absolutePath = path.join(this.#options.outputDir, ...asset.localPath.split("/"));
+      const absolutePath = this.#absoluteOutputPath(asset.localPath);
       const text = await readFile(absolutePath, "utf8");
       await this.#fetcher.fetchMissing(this.#rewriter.collectTextAssetUrls(text, asset.sourceUrl));
       const rewritten = /text\/css/i.test(asset.contentType)
         ? this.#rewriter.rewriteCss(text, asset.sourceUrl, asset.localPath)
         : this.#rewriter.rewriteCapturedText(text, asset.sourceUrl, asset.localPath);
-      await writeFile(absolutePath, rewritten, "utf8");
+      await this.#writeAssetCopies(asset.sourceUrl, rewritten);
     }
+  }
+
+  async #writeAssetCopies(sourceUrl: string, text: string): Promise<void> {
+    for (const localPath of this.#archive.localPathsFor(sourceUrl)) {
+      await writeFile(this.#absoluteOutputPath(localPath), text, "utf8");
+    }
+  }
+
+  #absoluteOutputPath(localPath: string): string {
+    return path.join(this.#options.outputDir, ...localPath.split("/"));
   }
 
   #isTextAsset(contentType: string, localPath: string): boolean {

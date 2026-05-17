@@ -121,6 +121,10 @@ export class AssetRewriter {
     $("script:not([src])").each((_, element) => {
       const current = $(element).html();
       if (current) {
+        if (current.includes("__framer_force_showing_editorbar_since")) {
+          $(element).remove();
+          return;
+        }
         $(element).text(this.rewriteCapturedText(current, pageUrl, routeLocalPath));
       }
     });
@@ -153,7 +157,11 @@ export class AssetRewriter {
 
 
     const withLocalSpecifiers = this.#rewriteRelativeSpecifiers(rewritten, baseUrl, fromLocalPath);
-    return /\.(mjs|js)$/i.test(fromLocalPath) ? this.#repairRelativeNewUrlBases(withLocalSpecifiers) : withLocalSpecifiers;
+    if (!/\.(mjs|js)$/i.test(fromLocalPath)) {
+      return withLocalSpecifiers;
+    }
+
+    return this.#disableFramerEditorBar(this.#repairRelativeNewUrlBases(withLocalSpecifiers));
   }
 
   collectExternalUrls(text: string): string[] {
@@ -292,6 +300,16 @@ export class AssetRewriter {
         return `new URL(${input},new URL(${quote}${relativeBase}${quote},import.meta.url))`;
       },
     );
+  }
+
+  #disableFramerEditorBar(text: string): string {
+    return text
+      .replace(/EditorBar:\(\)=>import\((['"`])https:\/\/framer\.com\/edit[^'"`]*\1\)/g, "EditorBar:void 0")
+      .replace(/EditorBar:\(\)=>import\((['"`])(?:\.\.?\/|\/)assets\/framer\.com\/edit[^'"`]*\1\)/g, "EditorBar:void 0")
+      .replace(
+        /EditorBar:(?:(?!adaptLayoutToTextDirection)[\s\S])*?framer\.com\/edit(?:(?!adaptLayoutToTextDirection)[\s\S])*?,adaptLayoutToTextDirection/g,
+        "EditorBar:void 0,adaptLayoutToTextDirection",
+      );
   }
 
   #rewriteRelativeSpecifiers(text: string, baseUrl: string, fromLocalPath: string): string {

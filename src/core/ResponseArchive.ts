@@ -32,6 +32,11 @@ export class ResponseArchive {
     return this.#assets.get(sourceUrl)?.localPath ?? this.#assetsByBareUrl.get(this.#bareUrl(sourceUrl))?.localPath;
   }
 
+  localPathsFor(sourceUrl: string): string[] {
+    const asset = this.#assets.get(sourceUrl) ?? this.#assetsByBareUrl.get(this.#bareUrl(sourceUrl));
+    return asset ? [asset.localPath, ...this.#aliasPaths(asset.sourceUrl, asset.localPath)] : [];
+  }
+
   has(sourceUrl: string): boolean {
     return this.#assets.has(sourceUrl);
   }
