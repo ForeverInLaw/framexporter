@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
-import type { FramerRuntimeAnalysis, RuntimeChunkSummary, RuntimeComponentModel, RuntimeMarkerCounts, RuntimeVariantStyleTarget } from "./types.js";
+import type { FramerRuntimeAnalysis, RuntimeChunkSummary, RuntimeComponentModel, RuntimeMarkerCounts, RuntimeVariantOverrideTarget, RuntimeVariantStyleTarget } from "./types.js";
 
 const MARKER_PATTERNS: Record<keyof RuntimeMarkerCounts, RegExp[]> = {
   transitions: [/\btransition\b/gi, /\bduration\b/gi, /\bdelay\b/gi, /\bease\b/gi, /\bdamping\b/gi, /\bstiffness\b/gi],
@@ -15,7 +15,9 @@ const MARKER_PATTERNS: Record<keyof RuntimeMarkerCounts, RegExp[]> = {
 
 const COMPONENT_WINDOW_CHARS = 9_000;
 const MAX_COMPONENT_MODELS = 120;
-const INTERACTION_STYLE_KEYS = new Set(["backgroundColor", "color", "opacity", "scale", "scaleX", "scaleY", "x", "y", "rotate", "rotation"]);
+const INTERACTION_STYLE_KEYS = new Set(["background", "backgroundColor", "borderColor", "boxShadow", "color", "filter", "opacity", "scale", "scaleX", "scaleY", "x", "y", "rotate", "rotation"]);
+const OVERRIDE_ATTRIBUTE_KEYS = new Set(["alt", "aria-label", "href", "placeholder", "src", "srcSet", "title", "value"]);
+const IMAGE_KEYS = new Set(["alt", "src", "srcSet"]);
 
 export class FramerRuntimeAnalyzer {
   constructor(private readonly inputDir: string) {}
@@ -83,10 +85,11 @@ export class FramerRuntimeAnalyzer {
       const windowSource = source.slice(windowStart, match.index);
       const variantClassMap = this.#lastVariantClassMap(windowSource);
       const variantStyleTargets = this.#variantStyleTargets(windowSource);
+      const variantOverrideTargets = this.#variantOverrideTargets(windowSource);
       const transition = this.#lastTransitionObject(windowSource);
       const rootClass = this.#lastBacktickMatch(windowSource, /`(framer-[A-Za-z0-9]+)`/g);
       const defaultVariant = this.#lastBacktickMatch(windowSource, /defaultVariant:`([^`]+)`/g);
-      const enabledGestures = this.#enabledGestures(windowSource, variantStyleTargets);
+      const enabledGestures = this.#enabledGestures(windowSource, [...variantStyleTargets, ...variantOverrideTargets]);
       const gestureCounts = this.#gestureCounts(windowSource);
       if (!rootClass && Object.keys(variantClassMap).length === 0) {
         continue;
@@ -103,6 +106,7 @@ export class FramerRuntimeAnalyzer {
         defaultVariant,
         variantClassMap,
         variantStyleTargets,
+        variantOverrideTargets,
         transition,
         enabledGestures,
         gestureCounts,
@@ -176,6 +180,80 @@ export class FramerRuntimeAnalyzer {
     return targets;
   }
 
+  #variantOverrideTargets(source: string): RuntimeVariantOverrideTarget[] {
+    const targets: RuntimeVariantOverrideTarget[] = [];
+    for (const spreadMatch of source.matchAll(/\.\.\.[A-Za-z_$][\w$]*\(\{/g)) {
+      const openIndex = (spreadMatch.index ?? 0) + spreadMatch[0].lastIndexOf("{");
+      const overrideObject = this.#readObjectAt(source, openIndex);
+      if (!overrideObject) {
+        continue;
+      }
+
+      const targetClass = this.#lastTargetClass(source.slice(Math.max(0, (spreadMatch.index ?? 0) - 900), spreadMatch.index));
+      if (!targetClass) {
+        continue;
+      }
+
+      for (const stateMatch of overrideObject.body.matchAll(/"([^"]+)-(hover|tap)":\{/g)) {
+        const bodyOpenIndex = openIndex + 1 + (stateMatch.index ?? 0) + stateMatch[0].length - 1;
+        const stateObject = this.#readObjectAt(source, bodyOpenIndex);
+        if (!stateObject) {
+          continue;
+        }
+
+        const override = this.#interactionOverride(stateObject.body);
+        if (!override.text && Object.keys(override.styles).length === 0 && Object.keys(override.attributes).length === 0 && Object.keys(override.image).length === 0) {
+          continue;
+        }
+
+        targets.push({
+          variant: stateMatch[1],
+          state: stateMatch[2] as "hover" | "tap",
+          targetClass,
+          ...override,
+        });
+      }
+    }
+    return targets;
+  }
+
+  #interactionOverride(source: string): Pick<RuntimeVariantOverrideTarget, "text" | "styles" | "attributes" | "image"> {
+    const styles = { ...this.#interactionStyles(source) };
+    for (const styleMatch of source.matchAll(/style:\{/g)) {
+      const styleObject = this.#readObjectAt(source, (styleMatch.index ?? 0) + styleMatch[0].length - 1);
+      if (styleObject) {
+        Object.assign(styles, this.#interactionStyles(styleObject.body));
+      }
+    }
+
+    const attributes = this.#literalRecord(source, OVERRIDE_ATTRIBUTE_KEYS);
+    const image = this.#imageOverride(source);
+    const text = [...source.matchAll(/children:`([^`$]+)`/g)].map((match) => match[1].trim()).filter(Boolean).at(-1);
+    return { text, styles, attributes, image };
+  }
+
+  #imageOverride(source: string): Record<string, string> {
+    const image: Record<string, string> = {};
+    for (const backgroundMatch of source.matchAll(/background:\{/g)) {
+      const backgroundObject = this.#readObjectAt(source, (backgroundMatch.index ?? 0) + backgroundMatch[0].length - 1);
+      if (backgroundObject) {
+        Object.assign(image, this.#literalRecord(backgroundObject.body, IMAGE_KEYS));
+      }
+    }
+    Object.assign(image, this.#literalRecord(source, IMAGE_KEYS));
+    return image;
+  }
+
+  #literalRecord(source: string, allowedKeys: ReadonlySet<string>): Record<string, string> {
+    const record: Record<string, string> = {};
+    for (const match of source.matchAll(/(?:(?:"([^"]+)")|([A-Za-z_$][\w$]*)):`([^`$]*)`/g)) {
+      const key = match[1] ?? match[2];
+      if (allowedKeys.has(key)) {
+        record[key] = match[3];
+      }
+    }
+    return record;
+  }
   #interactionStyles(source: string): Record<string, string | number | boolean> {
     const styles: Record<string, string | number | boolean> = {};
     for (const match of source.matchAll(/(?:"([^"]+)"|([A-Za-z_$][\w$]*)):(`[^`]*`|-?\d+(?:\.\d+)?|!0|!1)/g)) {
@@ -223,10 +301,10 @@ export class FramerRuntimeAnalyzer {
     return classes.at(-1);
   }
 
-  #enabledGestures(source: string, styleTargets: readonly RuntimeVariantStyleTarget[]): RuntimeComponentModel["enabledGestures"] {
+  #enabledGestures(source: string, stateTargets: readonly { readonly state: "hover" | "tap" }[]): RuntimeComponentModel["enabledGestures"] {
     return {
-      hover: /hover:!0/.test(source) || styleTargets.some((target) => target.state === "hover"),
-      tap: /tap:!0/.test(source) || styleTargets.some((target) => target.state === "tap"),
+      hover: /hover:!0/.test(source) || stateTargets.some((target) => target.state === "hover"),
+      tap: /tap:!0/.test(source) || stateTargets.some((target) => target.state === "tap"),
     };
   }
 
