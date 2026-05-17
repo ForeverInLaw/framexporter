@@ -16,7 +16,7 @@
 npm install
 npm run build
 npm run export -- https://example.framer.website --out exports/example
-npm run export:react -- exports/example --out exports-react/example
+npm run export:react -- exports/example --out exports-react/example --motion none
 ```
 
 The exporter reads `/sitemap.xml` when available, then crawls same-origin links. Use `--max-pages` only when you deliberately want to cap a large export.
@@ -29,16 +29,22 @@ npm run preview -- exports/example --port 4173
 
 If you omit the export path, preview scans `exports/` and asks which export to serve when the terminal is interactive.
 
+## Export Modes
+
+- `npm run export` writes a faithful HTML/CSS/JS static export with the original Framer runtime assets. Use this for 1:1 animation fidelity.
+- `npm run export:react -- exports/site --motion none` writes a Vite/React static DOM snapshot without Framer or GSAP animation runtime. Use this for editable React structure.
+- `--motion approximate` keeps the experimental GSAP approximation layer for testing only.
+
 ## React Export
 
 ```bash
-npm run export:react -- exports/example --out exports-react/example --app-name example-site
+npm run export:react -- exports/example --out exports-react/example --app-name example-site --motion none
 cd exports-react/example
 npm install
 npm run dev
 ```
 
-The React exporter creates a Vite app with route components under `src/pages`, shared exact-match, prop-inferred, and heuristically named components under `src/components`, a simple pathname router in `src/App.tsx`, copied assets under `public/assets`, and generated CSS under `src/styles/generated.css`.
+The React exporter creates a Vite app with route components under `src/pages`, shared exact-match, prop-inferred, and heuristically named components under `src/components`, a simple pathname router in `src/App.tsx`, copied assets under `public/assets`, and generated CSS under `src/styles/generated.css`. By default it removes animation runtime code and captures the hydrated page in its final visible state.
 
 ## Output
 

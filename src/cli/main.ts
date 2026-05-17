@@ -7,7 +7,7 @@ import { ExportJob } from "../core/ExportJob.js";
 import { StaticPreviewServer } from "../core/StaticPreviewServer.js";
 import type { ExportOptions } from "../core/types.js";
 import { ReactExportJob } from "../react-export/ReactExportJob.js";
-import type { ReactExportOptions } from "../react-export/types.js";
+import type { ReactExportOptions, ReactMotionMode } from "../react-export/types.js";
 
 type ParsedArgs = {
   readonly command: string | undefined;
@@ -19,6 +19,7 @@ type ParsedArgs = {
   readonly host: string;
   readonly port: number;
   readonly appName: string | undefined;
+  readonly motionMode: ReactMotionMode;
 };
 
 async function main(): Promise<void> {
@@ -68,6 +69,7 @@ async function runReactExport(args: ParsedArgs): Promise<void> {
   console.log(`Generated ${result.routes} React route component(s).`);
   console.log(`Extracted ${result.components} shared component(s).`);
   console.log(`Output: ${result.outputDir}`);
+  console.log(`Motion: ${options.motionMode}`);
   if (result.warnings.length > 0) {
     console.log("Warnings:");
     for (const warning of result.warnings) {
@@ -105,6 +107,7 @@ function parseArgs(argv: string[]): ParsedArgs {
   let host = "127.0.0.1";
   let port = 4173;
   let appName: string | undefined;
+  let motionMode: ReactMotionMode = "none";
 
   for (let index = 0; index < tokens.length; index += 1) {
     const token = tokens[index];
@@ -117,6 +120,9 @@ function parseArgs(argv: string[]): ParsedArgs {
       index += 1;
     } else if (token === "--app-name" && next) {
       appName = next;
+      index += 1;
+    } else if ((token === "--motion" || token === "--animations") && next) {
+      motionMode = parseMotionMode(next);
       index += 1;
     } else if (token === "--max-pages" && next) {
       maxPages = parsePositiveInt(next, "--max-pages");
@@ -137,7 +143,7 @@ function parseArgs(argv: string[]): ParsedArgs {
     }
   }
 
-  return { command, target, out, exportsDir, maxPages, waitMs, host, port, appName };
+  return { command, target, out, exportsDir, maxPages, waitMs, host, port, appName, motionMode };
 }
 
 type ExportDirectoryChoice = {
@@ -251,7 +257,18 @@ function buildReactExportOptions(args: ParsedArgs, inputDir: string): ReactExpor
     inputDir,
     outputDir: path.resolve(args.out),
     appName: normalizePackageName(args.appName ?? path.basename(path.resolve(args.out))),
+    motionMode: args.motionMode,
   };
+}
+
+function parseMotionMode(value: string): ReactMotionMode {
+  if (value === "none" || value === "off" || value === "false") {
+    return "none";
+  }
+  if (value === "approximate" || value === "approx" || value === "gsap") {
+    return "approximate";
+  }
+  throw new Error("--motion must be one of: none, approximate.");
 }
 
 function normalizePackageName(value: string): string {
@@ -267,7 +284,7 @@ function parsePositiveInt(value: string, optionName: string): number {
 }
 
 function printHelp(): void {
-  console.log(`framexporter\n\nUsage:\n  framexporter export <url> [--out exports/site] [--max-pages N] [--wait-ms 750]\n  framexporter preview [exports/site] [--exports-dir exports] [--host 127.0.0.1] [--port 4173]\n  framexporter react [exports/site] [--out exports-react/site] [--exports-dir exports] [--app-name name]\n`);
+  console.log(`framexporter\n\nUsage:\n  framexporter export <url> [--out exports/site] [--max-pages N] [--wait-ms 750]\n  framexporter preview [exports/site] [--exports-dir exports] [--host 127.0.0.1] [--port 4173]\n  framexporter react [exports/site] [--out exports-react/site] [--exports-dir exports] [--app-name name] [--motion none|approximate]\n`);
 }
 
 main().catch((error: unknown) => {

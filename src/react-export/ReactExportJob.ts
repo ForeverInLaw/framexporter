@@ -30,7 +30,7 @@ export class ReactExportJob {
   constructor(options: ReactExportOptions) {
     this.#options = options;
     this.#reader = new StaticExportReader(options.inputDir);
-    this.#snapshotter = new HydratedRouteSnapshotter({ rootDir: options.inputDir });
+    this.#snapshotter = new HydratedRouteSnapshotter({ rootDir: options.inputDir, motionMode: options.motionMode });
     this.#runtimeAnalyzer = new FramerRuntimeAnalyzer(options.inputDir);
     this.#writer = new ViteReactProjectWriter(options);
   }
@@ -53,11 +53,20 @@ export class ReactExportJob {
       routes: namedProject.pages.length,
       components: namedProject.components.length,
       outputDir: this.#options.outputDir,
-      warnings: [
-        "Clean React export is experimental: complex Framer interactions, CMS queries, forms, ecommerce, and custom runtime animations are not reconstructed yet.",
-        "React export is generated from hydrated browser DOM snapshots; Framer appear animations are approximated with a small GSAP runtime.",
-        `${runtimeAnalysis.chunkCount} Framer runtime chunk(s) and ${runtimeAnalysis.componentModels.length} component model candidate(s) were analyzed; inspect framexporter-runtime-analysis.json for 1:1 conversion targets.`,
-      ],
+      warnings: this.#warnings(runtimeAnalysis),
     };
+  }
+
+  #warnings(runtimeAnalysis: Awaited<ReturnType<FramerRuntimeAnalyzer["analyze"]>>): string[] {
+    const warnings = [
+      "Clean React export is experimental: complex Framer interactions, CMS queries, forms, ecommerce, and custom backends are not reconstructed.",
+      `${runtimeAnalysis.chunkCount} Framer runtime chunk(s) and ${runtimeAnalysis.componentModels.length} component model candidate(s) were analyzed; inspect framexporter-runtime-analysis.json for conversion targets.`,
+    ];
+    if (this.#options.motionMode === "none") {
+      warnings.push("React export is a static hydrated DOM snapshot; original Framer animations are intentionally removed.");
+    } else {
+      warnings.push("React export uses an experimental GSAP approximation layer, not the original Framer animation runtime.");
+    }
+    return warnings;
   }
 }

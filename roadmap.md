@@ -6,9 +6,10 @@ Core problem: a site owner needs a local backup of their published Framer websit
 
 Success criteria: a public page can be rendered, saved with assets, opened locally, and audited through a manifest.
 
-## Static Export Scope
+## Faithful HTML/CSS/JS Export Scope
 
 - CLI command: `framexporter export <url>`.
+- Output keeps original Framer HTML, CSS, JavaScript modules, and runtime assets for 1:1 animation behavior.
 - Playwright rendering for public pages.
 - Network asset capture for HTML, CSS, JS, images, fonts, SVG, and JSON.
 - Static URL discovery for `srcset`, inline styles, and stylesheet `url(...)` references.
@@ -17,12 +18,16 @@ Success criteria: a public page can be rendered, saved with assets, opened local
 - HTML and CSS URL rewriting for common references.
 - Manifest report for saved and skipped resources.
 
-## Experimental React Export Scope
+## Static React Snapshot Scope
 
-- CLI command: `framexporter react [exports/site] --out exports-react/site`.
+- CLI command: `framexporter react [exports/site] --out exports-react/site --motion none`.
 - Input is an existing static export folder, not private Framer APIs.
 - Output is a Vite/React project with route components, copied assets, and generated CSS.
-- The first compiler pass preserves rendered structure and visual CSS.`n- Repeated exact JSX subtrees and conservative repeated JSX shapes are extracted into shared generated components with string props.`n- Shared React components receive deterministic heuristic names such as `StatCard`, `ContentCard`, `TextLabel`, and `ResponsiveImage`.
+- Default React output is a static hydrated DOM snapshot without Framer or GSAP animation runtime.
+- `--motion approximate` is reserved for the experimental GSAP approximation layer.
+- The first compiler pass preserves rendered structure and visual CSS.
+- Repeated exact JSX subtrees and conservative repeated JSX shapes are extracted into shared generated components with string props.
+- Shared React components receive deterministic heuristic names such as `StatCard`, `ContentCard`, `TextLabel`, and `ResponsiveImage`.
 
 ## Explicitly Out of Scope
 

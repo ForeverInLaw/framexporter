@@ -1,9 +1,12 @@
 import type { ExportManifest } from "../core/types.js";
 
+export type ReactMotionMode = "none" | "approximate";
+
 export type ReactExportOptions = {
   readonly inputDir: string;
   readonly outputDir: string;
   readonly appName: string;
+  readonly motionMode: ReactMotionMode;
 };
 
 export type ReactRouteSource = {

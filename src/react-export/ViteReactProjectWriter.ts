@@ -8,7 +8,9 @@ export class ViteReactProjectWriter {
   async write(pages: ConvertedPage[], components: SharedComponent[], runtimeAnalysis: FramerRuntimeAnalysis): Promise<void> {
     await rm(this.options.outputDir, { recursive: true, force: true });
     await mkdir(path.join(this.options.outputDir, "src", "components"), { recursive: true });
-    await mkdir(path.join(this.options.outputDir, "src", "motion"), { recursive: true });
+    if (this.options.motionMode === "approximate") {
+      await mkdir(path.join(this.options.outputDir, "src", "motion"), { recursive: true });
+    }
     await mkdir(path.join(this.options.outputDir, "src", "pages"), { recursive: true });
     await mkdir(path.join(this.options.outputDir, "src", "styles"), { recursive: true });
     await mkdir(path.join(this.options.outputDir, "public"), { recursive: true });
@@ -22,8 +24,7 @@ export class ViteReactProjectWriter {
       this.#writeMain(),
       this.#writeViteEnv(),
       this.#writeFavicon(),
-      this.#writeMotionRegistry(runtimeAnalysis),
-      this.#writeMotionRuntime(),
+      ...(this.options.motionMode === "approximate" ? [this.#writeMotionRegistry(runtimeAnalysis), this.#writeMotionRuntime()] : []),
       this.#writeRuntimeAnalysis(runtimeAnalysis),
       this.#writeApp(pages.map((page) => page.route)),
       this.#writeCss(pages),
@@ -50,13 +51,12 @@ export class ViteReactProjectWriter {
         preview: "vite preview",
       },
       dependencies: {
-        "@gsap/react": "latest",
         "@vitejs/plugin-react": "latest",
-        gsap: "latest",
         vite: "latest",
         typescript: "latest",
         react: "latest",
         "react-dom": "latest",
+        ...(this.options.motionMode === "approximate" ? { "@gsap/react": "latest", gsap: "latest" } : {}),
       },
       devDependencies: {
         "@types/react": "latest",
@@ -144,15 +144,18 @@ export class ViteReactProjectWriter {
   async #writeApp(routes: ReactRouteSource[]): Promise<void> {
     const imports = routes.map((route) => `import { ${route.componentName} } from "./pages/${route.fileName.replace(/\.tsx$/, "")}";`).join("\n");
     const routeEntries = routes.map((route) => `  { path: ${JSON.stringify(route.routePath)}, Component: ${route.componentName} },`).join("\n");
+    const motionImport = this.options.motionMode === "approximate" ? `import { FramexporterMotion } from "./motion/FramexporterMotion";\n` : "";
+    const motionElement = this.options.motionMode === "approximate" ? "      <FramexporterMotion />\n" : "";
     await this.#writeText(
       path.join("src", "App.tsx"),
-      `import { FramexporterMotion } from "./motion/FramexporterMotion";\n${imports}\n\nconst routes = [\n${routeEntries}\n];\n\nexport function App() {\n  const currentPath = normalizePath(window.location.pathname);\n  const match = routes.find((route) => normalizePath(route.path) === currentPath) ?? routes[0];\n  const Component = match.Component;\n  return (\n    <>\n      <FramexporterMotion />\n      <Component />\n    </>\n  );\n}\n\nfunction normalizePath(pathname: string): string {\n  if (pathname.length > 1 && pathname.endsWith("/")) {\n    return pathname.slice(0, -1);\n  }\n  return pathname || "/";\n}\n`,
+      `${motionImport}${imports}\n\nconst routes = [\n${routeEntries}\n];\n\nexport function App() {\n  const currentPath = normalizePath(window.location.pathname);\n  const match = routes.find((route) => normalizePath(route.path) === currentPath) ?? routes[0];\n  const Component = match.Component;\n  return (\n    <>\n${motionElement}      <Component />\n    </>\n  );\n}\n\nfunction normalizePath(pathname: string): string {\n  if (pathname.length > 1 && pathname.endsWith("/")) {\n    return pathname.slice(0, -1);\n  }\n  return pathname || "/";\n}\n`,
     );
   }
 
   async #writeCss(pages: ConvertedPage[]): Promise<void> {
     const css = pages.map((page) => this.#rewriteCssUrls(page.css)).filter(Boolean).join("\n\n");
-    const baseCss = `html, body, #root { margin: 0; min-height: 100%; }\nbody { font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }\na { color: inherit; }\n*, *::before, *::after { box-sizing: border-box; }\n[data-framexporter-motion] { will-change: transform, opacity; }\n@media (prefers-reduced-motion: reduce) { [data-framexporter-motion] { opacity: 1 !important; transform: none !important; visibility: visible !important; } }\n`;
+    const motionCss = this.options.motionMode === "approximate" ? `[data-framexporter-motion] { will-change: transform, opacity; }\n@media (prefers-reduced-motion: reduce) { [data-framexporter-motion] { opacity: 1 !important; transform: none !important; visibility: visible !important; } }\n` : "";
+    const baseCss = `html, body, #root { margin: 0; min-height: 100%; }\nbody { font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }\na { color: inherit; }\n*, *::before, *::after { box-sizing: border-box; }\n${motionCss}`;
     await this.#writeText(path.join("src", "styles", "generated.css"), `${baseCss}\n${css}\n`);
   }
 

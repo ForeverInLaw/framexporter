@@ -1,10 +1,11 @@
 import { chromium, type Page } from "playwright";
 import { StaticPreviewServer } from "../core/StaticPreviewServer.js";
-import type { ReactRouteSource } from "./types.js";
+import type { ReactMotionMode, ReactRouteSource } from "./types.js";
 
 export type HydratedRouteSnapshotOptions = {
   readonly rootDir: string;
   readonly waitMs?: number;
+  readonly motionMode: ReactMotionMode;
 };
 
 const DEFAULT_WAIT_MS = 1200;
@@ -19,10 +20,12 @@ type BrowserGlobal = typeof globalThis & {
 export class HydratedRouteSnapshotter {
   readonly #rootDir: string;
   readonly #waitMs: number;
+  readonly #motionMode: ReactMotionMode;
 
   constructor(options: HydratedRouteSnapshotOptions) {
     this.#rootDir = options.rootDir;
     this.#waitMs = options.waitMs ?? DEFAULT_WAIT_MS;
+    this.#motionMode = options.motionMode;
   }
 
   async snapshot(routes: ReactRouteSource[]): Promise<ReactRouteSource[]> {
@@ -138,7 +141,8 @@ export class HydratedRouteSnapshotter {
   }
 
   async #finalizeMotionTargets(page: Page): Promise<void> {
-    await page.evaluate(() => {
+    const keepMotionMarkers = this.#motionMode === "approximate";
+    await page.evaluate((keepMarkers) => {
       const browserGlobal = globalThis as BrowserGlobal;
       const targets = Array.from(browserGlobal.document.querySelectorAll("[data-framexporter-motion]"));
       targets.forEach((rawElement, index) => {
@@ -146,8 +150,13 @@ export class HydratedRouteSnapshotter {
         element.style.opacity = "1";
         element.style.transform = "none";
         element.style.visibility = "visible";
-        element.style.setProperty("--framexporter-motion-delay", `${Math.min(index * 35, 420)}ms`);
+        if (keepMarkers) {
+          element.style.setProperty("--framexporter-motion-delay", `${Math.min(index * 35, 420)}ms`);
+        } else {
+          element.removeAttribute("data-framexporter-motion");
+          element.style.removeProperty("--framexporter-motion-delay");
+        }
       });
-    });
+    }, keepMotionMarkers);
   }
 }
