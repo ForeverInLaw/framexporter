@@ -1,0 +1,32 @@
+{
+  "name": "framexporter",
+  "version": "0.1.0",
+  "description": "A cautious CLI exporter for backing up public Framer sites you own.",
+  "type": "module",
+  "bin": {
+    "framexporter": "./dist/cli/main.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/cli/main.js",
+    "export": "node dist/cli/main.js export"
+  },
+  "keywords": [
+    "framer",
+    "export",
+    "backup",
+    "static-site"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "cheerio": "^1.0.0",
+    "playwright": "^1.58.2"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
