@@ -8,7 +8,7 @@ Success criteria: a public page can be rendered, saved with assets, opened local
 
 ## Faithful HTML/CSS/JS Export Scope
 
-- CLI command: `framexporter export <url>`.
+- CLI command: `framexporter export <url>`, defaulting to `exports/<hostname>`.
 - Output keeps original Framer HTML, CSS, JavaScript modules, and runtime assets for 1:1 animation behavior.
 - Playwright rendering for public pages.
 - Network asset capture for HTML, CSS, JS, images, fonts, SVG, and JSON.
@@ -20,7 +20,7 @@ Success criteria: a public page can be rendered, saved with assets, opened local
 
 ## Static React Snapshot Scope
 
-- CLI command: `framexporter react [exports/site] --out exports-react/site --motion none`.
+- CLI command: `framexporter react exports/<name>`, defaulting to `exports-react/<name>`.
 - Input is an existing static export folder, not private Framer APIs.
 - Output is a Vite/React project with route components, copied assets, and generated CSS.
 - Default React output is a static hydrated DOM snapshot without Framer or GSAP animation runtime.

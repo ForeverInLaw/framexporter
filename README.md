@@ -15,16 +15,16 @@
 ```bash
 npm install
 npm run build
-npm run export -- https://example.framer.website --out exports/example
-npm run export:react -- exports/example --out exports-react/example --motion none
+npm run export https://example.com
+npm run export:react exports/example.com
 ```
 
-The exporter reads `/sitemap.xml` when available, then crawls same-origin links. Use `--max-pages` only when you deliberately want to cap a large export.
+Without `--out`, `export` writes to `exports/<hostname>` and `export:react` writes to `exports-react/<input-folder-name>`. The exporter reads `/sitemap.xml` when available, then crawls same-origin links. Use `--max-pages` only when you deliberately want to cap a large export.
 
 ## Preview
 
 ```bash
-npm run preview -- exports/example --port 4173
+npm run preview -- exports/example.com --port 4173
 ```
 
 If you omit the export path, preview scans `exports/` and asks which export to serve when the terminal is interactive.
@@ -32,14 +32,14 @@ If you omit the export path, preview scans `exports/` and asks which export to s
 ## Export Modes
 
 - `npm run export` writes a faithful HTML/CSS/JS static export with the original Framer runtime assets. Use this for 1:1 animation fidelity.
-- `npm run export:react -- exports/site --motion none` writes a Vite/React static DOM snapshot without Framer or GSAP animation runtime. Use this for editable React structure.
-- `--motion approximate` keeps the experimental GSAP approximation layer for testing only.
+- `npm run export:react exports/example.com` writes a Vite/React static DOM snapshot without Framer or GSAP animation runtime. Use this for editable React structure.
+- `none` is the default React motion mode. Use `npm run export:react exports/example.com approximate` for the experimental GSAP approximation layer.
 
 ## React Export
 
 ```bash
-npm run export:react -- exports/example --out exports-react/example --app-name example-site --motion none
-cd exports-react/example
+npm run export:react exports/example.com
+cd exports-react/example.com
 npm install
 npm run dev
 ```
@@ -49,12 +49,12 @@ The React exporter creates a Vite app with route components under `src/pages`, s
 ## Output
 
 ```text
-exports/example/
+exports/example.com/
   index.html
   assets/
   manifest.json
 
-exports-react/example/
+exports-react/example.com/
   index.html
   public/assets/
   src/App.tsx

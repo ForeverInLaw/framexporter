@@ -12,7 +12,7 @@ import type { ReactExportOptions, ReactMotionMode } from "../react-export/types.
 type ParsedArgs = {
   readonly command: string | undefined;
   readonly target: string | undefined;
-  readonly out: string;
+  readonly out: string | undefined;
   readonly exportsDir: string;
   readonly maxPages: number | undefined;
   readonly waitMs: number;
@@ -100,7 +100,7 @@ async function runPreview(args: ParsedArgs): Promise<void> {
 function parseArgs(argv: string[]): ParsedArgs {
   const [command, ...tokens] = argv;
   let target: string | undefined;
-  let out = command === "react" ? "exports-react/site" : "exports/site";
+  let out: string | undefined;
   let exportsDir = "exports";
   let maxPages: number | undefined;
   let waitMs = 750;
@@ -124,6 +124,8 @@ function parseArgs(argv: string[]): ParsedArgs {
     } else if ((token === "--motion" || token === "--animations") && next) {
       motionMode = parseMotionMode(next);
       index += 1;
+    } else if (command === "react" && isMotionModeValue(token)) {
+      motionMode = parseMotionMode(token);
     } else if (token === "--max-pages" && next) {
       maxPages = parsePositiveInt(next, "--max-pages");
       index += 1;
@@ -246,29 +248,54 @@ function buildExportOptions(args: ParsedArgs): ExportOptions {
 
   return {
     startUrl,
-    outputDir: path.resolve(args.out),
+    outputDir: path.resolve(args.out ?? defaultExportOutputDir(startUrl)),
     maxPages: args.maxPages,
     waitMs: args.waitMs,
   };
 }
 
 function buildReactExportOptions(args: ParsedArgs, inputDir: string): ReactExportOptions {
+  const outputDir = defaultReactOutputDir(args, inputDir);
   return {
     inputDir,
-    outputDir: path.resolve(args.out),
-    appName: normalizePackageName(args.appName ?? path.basename(path.resolve(args.out))),
+    outputDir,
+    appName: normalizePackageName(args.appName ?? path.basename(outputDir)),
     motionMode: args.motionMode,
   };
 }
 
 function parseMotionMode(value: string): ReactMotionMode {
-  if (value === "none" || value === "off" || value === "false") {
+  const normalized = value.toLowerCase();
+  if (normalized === "none" || normalized === "off" || normalized === "false") {
     return "none";
   }
-  if (value === "approximate" || value === "approx" || value === "gsap") {
+  if (normalized === "approximate" || normalized === "approx" || normalized === "gsap") {
     return "approximate";
   }
   throw new Error("--motion must be one of: none, approximate.");
+}
+
+function isMotionModeValue(value: string): boolean {
+  const normalized = value.toLowerCase();
+  return normalized === "none" || normalized === "off" || normalized === "false" || normalized === "approximate" || normalized === "approx" || normalized === "gsap";
+}
+
+function defaultExportOutputDir(startUrl: URL): string {
+  return path.join("exports", safeDirectoryName(startUrl.hostname));
+}
+
+function defaultReactOutputDir(args: ParsedArgs, inputDir: string): string {
+  return path.resolve(args.out ?? path.join("exports-react", safeDirectoryName(path.basename(inputDir))));
+}
+
+function safeDirectoryName(value: string): string {
+  return value
+    .trim()
+    .replace(/[<>:"/\\|?*\x00-\x1F]+/g, "-")
+    .replace(/\s+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .replace(/^\.+|\.+$/g, "")
+    || "site";
 }
 
 function normalizePackageName(value: string): string {
@@ -284,7 +311,7 @@ function parsePositiveInt(value: string, optionName: string): number {
 }
 
 function printHelp(): void {
-  console.log(`framexporter\n\nUsage:\n  framexporter export <url> [--out exports/site] [--max-pages N] [--wait-ms 750]\n  framexporter preview [exports/site] [--exports-dir exports] [--host 127.0.0.1] [--port 4173]\n  framexporter react [exports/site] [--out exports-react/site] [--exports-dir exports] [--app-name name] [--motion none|approximate]\n`);
+  console.log(`framexporter\n\nUsage:\n  framexporter export <url> [--out exports/name] [--max-pages N] [--wait-ms 750]\n  framexporter preview [exports/site] [--exports-dir exports] [--host 127.0.0.1] [--port 4173]\n  framexporter react [exports/site] [--out exports-react/name] [--exports-dir exports] [--app-name name] [--motion none|approximate]\n`);
 }
 
 main().catch((error: unknown) => {
