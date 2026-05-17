@@ -8,6 +8,7 @@ export class ViteReactProjectWriter {
   async write(pages: ConvertedPage[], components: SharedComponent[]): Promise<void> {
     await rm(this.options.outputDir, { recursive: true, force: true });
     await mkdir(path.join(this.options.outputDir, "src", "components"), { recursive: true });
+    await mkdir(path.join(this.options.outputDir, "src", "motion"), { recursive: true });
     await mkdir(path.join(this.options.outputDir, "src", "pages"), { recursive: true });
     await mkdir(path.join(this.options.outputDir, "src", "styles"), { recursive: true });
     await mkdir(path.join(this.options.outputDir, "public"), { recursive: true });
@@ -21,6 +22,7 @@ export class ViteReactProjectWriter {
       this.#writeMain(),
       this.#writeViteEnv(),
       this.#writeFavicon(),
+      this.#writeMotionRuntime(),
       this.#writeApp(pages.map((page) => page.route)),
       this.#writeCss(pages),
       ...pages.map((page) => this.#writePage(page)),
@@ -46,7 +48,9 @@ export class ViteReactProjectWriter {
         preview: "vite preview",
       },
       dependencies: {
+        "@gsap/react": "latest",
         "@vitejs/plugin-react": "latest",
+        gsap: "latest",
         vite: "latest",
         typescript: "latest",
         react: "latest",
@@ -105,18 +109,25 @@ export class ViteReactProjectWriter {
     await this.#writeText(path.join("public", "favicon.ico"), "");
   }
 
+  async #writeMotionRuntime(): Promise<void> {
+    await this.#writeText(
+      path.join("src", "motion", "FramexporterMotion.tsx"),
+      `import { useGSAP } from "@gsap/react";\nimport gsap from "gsap";\n\ngsap.registerPlugin(useGSAP);\n\ntype MotionKind = "fade-up" | "fade-left" | "fade-right";\n\nexport function FramexporterMotion() {\n  useGSAP(() => {\n    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {\n      return;\n    }\n\n    const elements = gsap.utils.toArray<HTMLElement>("[data-framexporter-motion]");\n    const observer = new IntersectionObserver((entries) => {\n      for (const entry of entries) {\n        if (!entry.isIntersecting) {\n          continue;\n        }\n\n        const element = entry.target as HTMLElement;\n        observer.unobserve(element);\n        animateElement(element);\n      }\n    }, { rootMargin: "0px 0px -8% 0px", threshold: 0.12 });\n\n    for (const element of elements) {\n      observer.observe(element);\n    }\n\n    return () => observer.disconnect();\n  }, { dependencies: [] });\n\n  return null;\n}\n\nfunction animateElement(element: HTMLElement): void {\n  gsap.fromTo(\n    element,\n    initialVars(motionKind(element)),\n    {\n      autoAlpha: 1,\n      x: 0,\n      y: 0,\n      duration: 0.72,\n      delay: delaySeconds(element),\n      ease: "power3.out",\n      overwrite: "auto",\n      clearProps: "transform,opacity,visibility,willChange",\n    },\n  );\n}\n\nfunction initialVars(kind: MotionKind): gsap.TweenVars {\n  if (kind === "fade-left") {\n    return { autoAlpha: 0, x: 36, y: 0, willChange: "transform,opacity" };\n  }\n  if (kind === "fade-right") {\n    return { autoAlpha: 0, x: -36, y: 0, willChange: "transform,opacity" };\n  }\n  return { autoAlpha: 0, x: 0, y: 42, willChange: "transform,opacity" };\n}\n\nfunction motionKind(element: HTMLElement): MotionKind {\n  const raw = element.dataset.framexporterMotion;\n  return raw === "fade-left" || raw === "fade-right" ? raw : "fade-up";\n}\n\nfunction delaySeconds(element: HTMLElement): number {\n  const raw = element.style.getPropertyValue("--framexporter-motion-delay").trim();\n  const milliseconds = Number(raw.replace("ms", ""));\n  return Number.isFinite(milliseconds) ? milliseconds / 1000 : 0;\n}\n`,
+    );
+  }
+
   async #writeApp(routes: ReactRouteSource[]): Promise<void> {
     const imports = routes.map((route) => `import { ${route.componentName} } from "./pages/${route.fileName.replace(/\.tsx$/, "")}";`).join("\n");
     const routeEntries = routes.map((route) => `  { path: ${JSON.stringify(route.routePath)}, Component: ${route.componentName} },`).join("\n");
     await this.#writeText(
       path.join("src", "App.tsx"),
-      `${imports}\n\nconst routes = [\n${routeEntries}\n];\n\nexport function App() {\n  const currentPath = normalizePath(window.location.pathname);\n  const match = routes.find((route) => normalizePath(route.path) === currentPath) ?? routes[0];\n  const Component = match.Component;\n  return <Component />;\n}\n\nfunction normalizePath(pathname: string): string {\n  if (pathname.length > 1 && pathname.endsWith("/")) {\n    return pathname.slice(0, -1);\n  }\n  return pathname || "/";\n}\n`,
+      `import { FramexporterMotion } from "./motion/FramexporterMotion";\n${imports}\n\nconst routes = [\n${routeEntries}\n];\n\nexport function App() {\n  const currentPath = normalizePath(window.location.pathname);\n  const match = routes.find((route) => normalizePath(route.path) === currentPath) ?? routes[0];\n  const Component = match.Component;\n  return (\n    <>\n      <FramexporterMotion />\n      <Component />\n    </>\n  );\n}\n\nfunction normalizePath(pathname: string): string {\n  if (pathname.length > 1 && pathname.endsWith("/")) {\n    return pathname.slice(0, -1);\n  }\n  return pathname || "/";\n}\n`,
     );
   }
 
   async #writeCss(pages: ConvertedPage[]): Promise<void> {
     const css = pages.map((page) => this.#rewriteCssUrls(page.css)).filter(Boolean).join("\n\n");
-    const baseCss = `html, body, #root { margin: 0; min-height: 100%; }\nbody { font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }\na { color: inherit; }\n*, *::before, *::after { box-sizing: border-box; }\n#root > * { animation: framexporter-fade-in 640ms cubic-bezier(.2, .8, .2, 1) both; }\n[class^="framer-"], [class*=" framer-"] { transition-property: opacity, transform, background, border-color, color, box-shadow; transition-duration: 220ms; transition-timing-function: ease; }\n@keyframes framexporter-fade-in { from { opacity: .001; transform: translateY(12px); } to { opacity: 1; transform: none; } }\n`;
+    const baseCss = `html, body, #root { margin: 0; min-height: 100%; }\nbody { font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }\na { color: inherit; }\n*, *::before, *::after { box-sizing: border-box; }\n[data-framexporter-motion] { will-change: transform, opacity; }\n@media (prefers-reduced-motion: reduce) { [data-framexporter-motion] { opacity: 1 !important; transform: none !important; visibility: visible !important; } }\n`;
     await this.#writeText(path.join("src", "styles", "generated.css"), `${baseCss}\n${css}\n`);
   }
 

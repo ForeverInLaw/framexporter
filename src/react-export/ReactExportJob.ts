@@ -51,7 +51,7 @@ export class ReactExportJob {
       outputDir: this.#options.outputDir,
       warnings: [
         "Clean React export is experimental: complex Framer interactions, CMS queries, forms, ecommerce, and custom runtime animations are not reconstructed yet.",
-        "React export is generated from hydrated browser DOM snapshots, then scripts are removed and visible final states are preserved.",
+        "React export is generated from hydrated browser DOM snapshots; Framer appear animations are approximated with a small GSAP runtime.",
       ],
     };
   }
