@@ -139,6 +139,9 @@ export class ExportJob {
   }
 
   #isTextAsset(contentType: string, localPath: string): boolean {
+    if (/\.(redstonecms|framercms)$/i.test(localPath)) {
+      return false;
+    }
     return /text\/css|javascript|application\/json|manifest\+json/i.test(contentType) || /\.(js|mjs|css|json)$/i.test(localPath);
   }
 
