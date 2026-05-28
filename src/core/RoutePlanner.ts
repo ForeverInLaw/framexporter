@@ -37,7 +37,7 @@ export class RoutePlanner {
     const $ = cheerio.load(html);
     const links: string[] = [];
 
-    $("a[href]").each((_, element) => {
+    $("a[href], link[rel='alternate'][href]").each((_, element) => {
       const href = $(element).attr("href");
       if (!href) {
         return;
