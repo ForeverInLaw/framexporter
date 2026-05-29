@@ -166,7 +166,7 @@ export class StaticPreviewServer {
         continue;
       }
       if (await this.#isFile(filePath)) {
-        return { filePath, status: candidate === "404/index.html" ? 404 : 200 };
+        return { filePath, status: candidate.endsWith("404/index.html") ? 404 : 200 };
       }
     }
     return undefined;
@@ -185,6 +185,12 @@ export class StaticPreviewServer {
       } else if (!path.posix.extname(cleanPath)) {
         candidates.push(path.posix.join(cleanPath, "index.html"));
       }
+    }
+
+    const match = requestPath.match(/^\/([a-z]{2}(?:-[a-zA-Z]{2,4})?)(?:\/|$)/);
+    if (match) {
+      const locale = match[1];
+      candidates.push(`${locale}/404/index.html`);
     }
 
     candidates.push("404/index.html", "index.html");
