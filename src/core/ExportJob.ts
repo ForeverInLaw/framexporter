@@ -37,6 +37,29 @@ export class ExportJob {
     const sitemapRoutes = planner.enqueueAll(discoveredSitemapUrls);
     const routes: ExportedRoute[] = [];
 
+    const activeLocales = new Set<string>();
+    // Enqueue default 404 page
+    const default404 = new URL("/404", this.#options.startUrl);
+    planner.enqueue(default404.toString());
+    this.#routePaths.register(default404.toString());
+
+    // Detect locales from sitemap URLs
+    for (const urlStr of [this.#options.startUrl.toString(), ...discoveredSitemapUrls]) {
+      try {
+        const parsed = new URL(urlStr);
+        const match = parsed.pathname.match(/^\/([a-z]{2}(?:-[a-zA-Z]{2,4})?)(?:\/|$)/);
+        if (match) {
+          const locale = match[1];
+          if (!activeLocales.has(locale)) {
+            activeLocales.add(locale);
+            const localized404 = new URL(`/${locale}/404`, this.#options.startUrl);
+            planner.enqueue(localized404.toString());
+            this.#routePaths.register(localized404.toString());
+          }
+        }
+      } catch {}
+    }
+
     await this.#renderer.start();
     try {
       while (!this.#isPageLimitReached(routes.length)) {
@@ -49,6 +72,24 @@ export class ExportJob {
         const rendered = await this.#renderer.render(nextUrl);
         const discoveredLinks = planner.discover(rendered.html, rendered.url);
         this.#routePaths.registerAll(discoveredLinks);
+
+        // Detect new active locales from crawled page links and enqueue their 404 pages
+        for (const link of discoveredLinks) {
+          try {
+            const parsed = new URL(link);
+            const match = parsed.pathname.match(/^\/([a-z]{2}(?:-[a-zA-Z]{2,4})?)(?:\/|$)/);
+            if (match) {
+              const locale = match[1];
+              if (!activeLocales.has(locale)) {
+                activeLocales.add(locale);
+                const localized404 = new URL(`/${locale}/404`, this.#options.startUrl);
+                planner.enqueue(localized404.toString());
+                this.#routePaths.register(localized404.toString());
+              }
+            }
+          } catch {}
+        }
+
         const staticUrls = this.#rewriter.collectHtmlAssetUrls(rendered.html, rendered.url);
         await this.#fetcher.fetchMissing(staticUrls);
         const localPath = this.#routePaths.register(nextUrl) ?? "index.html";
