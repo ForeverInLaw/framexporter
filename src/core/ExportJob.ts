@@ -7,7 +7,11 @@ import { ResponseArchive } from "./ResponseArchive.js";
 import { RoutePathMapper } from "./RoutePathMapper.js";
 import { RoutePlanner } from "./RoutePlanner.js";
 import { SitemapDiscoverer } from "./SitemapDiscoverer.js";
+import { runWithConcurrency } from "./runWithConcurrency.js";
 import type { CapturedAsset, ExportManifest, ExportOptions, ExportedRoute } from "./types.js";
+
+const MAX_TEXT_ASSET_REWRITE_CONCURRENCY = 4;
+const MAX_EXTERNAL_URL_SCAN_CONCURRENCY = 8;
 
 export class ExportJob {
   readonly #options: ExportOptions;
@@ -135,30 +139,36 @@ export class ExportJob {
     const processed = new Set<string>();
 
     for (;;) {
-      const asset = this.#archive.assets.find((asset) => !processed.has(asset.sourceUrl) && this.#isTextAsset(asset.contentType, asset.localPath));
-      if (!asset) {
+      const batch = this.#archive.assets.filter((asset) => !processed.has(asset.sourceUrl) && this.#isTextAsset(asset.contentType, asset.localPath));
+      if (batch.length === 0) {
         return;
       }
 
-      processed.add(asset.sourceUrl);
-      if (!this.#shouldRewriteAssetText(asset)) {
-        continue;
-      }
-
-      const absolutePath = this.#absoluteOutputPath(asset.localPath);
-      const text = await readFile(absolutePath, "utf8");
-      await this.#fetcher.fetchMissing(this.#rewriter.collectTextAssetUrls(text, asset.sourceUrl));
-      const rewritten = /text\/css/i.test(asset.contentType)
-        ? this.#rewriter.rewriteCss(text, asset.sourceUrl, asset.localPath)
-        : this.#rewriter.rewriteCapturedText(text, asset.sourceUrl, asset.localPath);
-      await this.#writeAssetCopies(asset.sourceUrl, rewritten);
+      await runWithConcurrency(batch, MAX_TEXT_ASSET_REWRITE_CONCURRENCY, async (asset) => {
+        processed.add(asset.sourceUrl);
+        await this.#rewriteCapturedAsset(asset);
+      });
     }
   }
 
-  async #writeAssetCopies(sourceUrl: string, text: string): Promise<void> {
-    for (const localPath of this.#archive.localPathsFor(sourceUrl)) {
-      await writeFile(this.#absoluteOutputPath(localPath), text, "utf8");
+  async #rewriteCapturedAsset(asset: CapturedAsset): Promise<void> {
+    if (!this.#shouldRewriteAssetText(asset)) {
+      return;
     }
+
+    const absolutePath = this.#absoluteOutputPath(asset.localPath);
+    const text = await readFile(absolutePath, "utf8");
+    await this.#fetcher.fetchMissing(this.#rewriter.collectTextAssetUrls(text, asset.sourceUrl));
+    const rewritten = /text\/css/i.test(asset.contentType)
+      ? this.#rewriter.rewriteCss(text, asset.sourceUrl, asset.localPath)
+      : this.#rewriter.rewriteCapturedText(text, asset.sourceUrl, asset.localPath);
+    await this.#writeAssetCopies(asset.sourceUrl, rewritten);
+  }
+
+  async #writeAssetCopies(sourceUrl: string, text: string): Promise<void> {
+    await Promise.all(
+      this.#archive.localPathsFor(sourceUrl).map((localPath) => writeFile(this.#absoluteOutputPath(localPath), text, "utf8")),
+    );
   }
 
   #absoluteOutputPath(localPath: string): string {
@@ -204,12 +214,13 @@ export class ExportJob {
 
   async #collectExternalUrls(): Promise<string[]> {
     const urls = new Set<string>();
-    for (const filePath of await this.#listTextFiles(this.#options.outputDir)) {
+    const files = await this.#listTextFiles(this.#options.outputDir);
+    await runWithConcurrency(files, MAX_EXTERNAL_URL_SCAN_CONCURRENCY, async (filePath) => {
       const text = await readFile(filePath, "utf8");
       for (const url of this.#rewriter.collectExternalUrls(text)) {
         urls.add(url);
       }
-    }
+    });
     return [...urls].sort();
   }
 

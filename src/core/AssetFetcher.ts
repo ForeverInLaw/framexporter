@@ -1,14 +1,33 @@
 import type { ResponseArchive } from "./ResponseArchive.js";
+import { runWithConcurrency } from "./runWithConcurrency.js";
+
+const MAX_CONCURRENT_FETCHES = 8;
 
 export class AssetFetcher {
+  readonly #pending = new Map<string, Promise<void>>();
+
   constructor(private readonly archive: ResponseArchive) {}
 
   async fetchMissing(urls: string[]): Promise<void> {
-    for (const url of urls) {
-      if (this.archive.has(url)) {
-        continue;
-      }
-      await this.#fetchOne(url);
+    const uniqueUrls = [...new Set(urls)].filter((url) => !this.archive.has(url));
+    await runWithConcurrency(uniqueUrls, MAX_CONCURRENT_FETCHES, async (sourceUrl) => {
+      await this.#fetchDeduped(sourceUrl);
+    });
+  }
+
+  async #fetchDeduped(sourceUrl: string): Promise<void> {
+    const pending = this.#pending.get(sourceUrl);
+    if (pending) {
+      await pending;
+      return;
+    }
+
+    const task = this.#fetchOne(sourceUrl);
+    this.#pending.set(sourceUrl, task);
+    try {
+      await task;
+    } finally {
+      this.#pending.delete(sourceUrl);
     }
   }
 

@@ -9,6 +9,8 @@ import type { ExportOptions } from "../core/types.js";
 import { ReactExportJob } from "../react-export/ReactExportJob.js";
 import type { ReactExportOptions, ReactMotionMode } from "../react-export/types.js";
 
+const DEFAULT_WAIT_MS = 300;
+
 type ParsedArgs = {
   readonly command: string | undefined;
   readonly target: string | undefined;
@@ -104,7 +106,7 @@ function parseArgs(argv: string[]): ParsedArgs {
   let out: string | undefined;
   let exportsDir = "exports";
   let maxPages: number | undefined;
-  let waitMs = 750;
+  let waitMs = DEFAULT_WAIT_MS;
   let host = "127.0.0.1";
   let port = 4173;
   let appName: string | undefined;
@@ -344,7 +346,7 @@ function parsePositiveInt(value: string, optionName: string): number {
 }
 
 function printHelp(): void {
-  console.log(`framexporter\n\nUsage:\n  framexporter export <url> [--out exports/name] [--max-pages N] [--wait-ms 750]\n  framexporter preview [exports/site] [--exports-dir exports] [--host 127.0.0.1] [--port 4173]\n  framexporter react [exports/site] [--out exports-react/name] [--exports-dir exports] [--app-name name] [--motion none|approximate]\n`);
+  console.log(`framexporter\n\nUsage:\n  framexporter export <url> [--out exports/name] [--max-pages N] [--wait-ms ${DEFAULT_WAIT_MS}]\n  framexporter preview [exports/site] [--exports-dir exports] [--host 127.0.0.1] [--port 4173]\n  framexporter react [exports/site] [--out exports-react/name] [--exports-dir exports] [--app-name name] [--motion none|approximate]\n`);
 }
 
 main().catch((error: unknown) => {
