@@ -19,7 +19,7 @@ npm run export https://example.com
 npm run export:react exports/example.com
 ```
 
-Without `--out`, `export` writes to `exports/<hostname>` and `export:react` writes to `exports-react/<input-folder-name>`. The exporter reads `/sitemap.xml` when available, then crawls same-origin links. Use `--max-pages` only when you deliberately want to cap a large export.
+Without `--out`, `export` writes to `exports/<hostname>` and `export:react` writes to `exports-react/<input-folder-name>`. The exporter reads `/sitemap.xml` when available, then crawls same-origin links. Use `--max-pages` only when you deliberately want to cap a large export. Static export renders with a default concurrency of 5 pages at a time; raise it with `--render-concurrency 10` if the machine and target site can handle it.
 
 ## Preview
 

@@ -16,6 +16,7 @@ export type ExportOptions = {
   readonly outputDir: string;
   readonly maxPages: number | undefined;
   readonly waitMs: number;
+  readonly renderConcurrency: number;
   readonly onProgress?: ExportProgressReporter;
 };
 

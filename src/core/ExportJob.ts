@@ -12,6 +12,7 @@ import type { CapturedAsset, ExportManifest, ExportOptions, ExportProgress, Expo
 
 const MAX_TEXT_ASSET_REWRITE_CONCURRENCY = 4;
 const MAX_EXTERNAL_URL_SCAN_CONCURRENCY = 8;
+const DEFAULT_RENDER_CONCURRENCY = 5;
 
 export class ExportJob {
   readonly #options: ExportOptions;
@@ -22,11 +23,17 @@ export class ExportJob {
   readonly #routePaths: RoutePathMapper;
   readonly #sitemapDiscoverer = new SitemapDiscoverer();
   readonly #warnings: string[] = [];
+  readonly #crawlWaiters: Array<() => void> = [];
+  readonly #renderConcurrency: number;
   #routesCompleted = 0;
   #assetFetchesCompleted = 0;
+  #routesScheduled = 0;
+  #routesInFlight = 0;
+  #crawlFailure: Error | undefined;
 
   constructor(options: ExportOptions) {
     this.#options = options;
+    this.#renderConcurrency = Math.max(1, options.renderConcurrency || DEFAULT_RENDER_CONCURRENCY);
     this.#archive = new ResponseArchive(options.outputDir);
     this.#fetcher = new AssetFetcher(this.#archive);
     this.#routePaths = new RoutePathMapper(options.startUrl);
@@ -36,14 +43,13 @@ export class ExportJob {
 
   async run(): Promise<ExportManifest> {
     await mkdir(this.#options.outputDir, { recursive: true });
-    const planner = new RoutePlanner(this.#options.startUrl);
+    const activeLocales = new Set<string>();
+    const planner = new RoutePlanner(this.#options.startUrl, () => this.#signalCrawlWork());
     this.#routePaths.register(this.#options.startUrl.toString());
     const discoveredSitemapUrls = await this.#sitemapDiscoverer.discover(this.#options.startUrl);
     this.#routePaths.registerAll(discoveredSitemapUrls);
     const sitemapRoutes = planner.enqueueAll(discoveredSitemapUrls);
-    const routes: ExportedRoute[] = [];
 
-    const activeLocales = new Set<string>();
     // Enqueue default 404 page
     const default404 = new URL("/404", this.#options.startUrl);
     planner.enqueue(default404.toString());
@@ -51,99 +57,166 @@ export class ExportJob {
 
     // Detect locales from sitemap URLs
     for (const urlStr of [this.#options.startUrl.toString(), ...discoveredSitemapUrls]) {
-      try {
-        const parsed = new URL(urlStr);
-        const match = parsed.pathname.match(/^\/([a-z]{2}(?:-[a-zA-Z]{2,4})?)(?:\/|$)/);
-        if (match) {
-          const locale = match[1];
-          if (!activeLocales.has(locale)) {
-            activeLocales.add(locale);
-            const localized404 = new URL(`/${locale}/404`, this.#options.startUrl);
-            planner.enqueue(localized404.toString());
-            this.#routePaths.register(localized404.toString());
-          }
-        }
-      } catch {}
+      this.#enqueueLocalized404(planner, activeLocales, urlStr);
     }
 
     await this.#renderer.start();
     try {
       this.#reportProgress("rendering", this.#options.startUrl.toString());
-      while (!this.#isPageLimitReached(routes.length)) {
-        const nextUrl = planner.next();
-        if (!nextUrl) {
-          break;
-        }
+      const routes = await this.#crawlRoutes(planner, activeLocales);
+      await this.#rewriteCapturedAssets();
+      this.#addRuntimeWarnings();
 
-        planner.markVisited(nextUrl);
-        this.#reportProgress("rendering", nextUrl);
-        const rendered = await this.#renderer.render(nextUrl);
-        const discoveredLinks = planner.discover(rendered.html, rendered.url);
-        this.#routePaths.registerAll(discoveredLinks);
+      const manifest: ExportManifest = {
+        generatedAt: new Date().toISOString(),
+        startUrl: this.#options.startUrl.toString(),
+        sitemapRoutes,
+        routes,
+        assets: this.#archive.assets,
+        skipped: this.#archive.skipped,
+        externalUrls: await this.#collectExternalUrls(),
+        warnings: this.#warnings,
+      };
 
-        // Detect new active locales from crawled page links and enqueue their 404 pages
-        for (const link of discoveredLinks) {
-          try {
-            const parsed = new URL(link);
-            const match = parsed.pathname.match(/^\/([a-z]{2}(?:-[a-zA-Z]{2,4})?)(?:\/|$)/);
-            if (match) {
-              const locale = match[1];
-              if (!activeLocales.has(locale)) {
-                activeLocales.add(locale);
-                const localized404 = new URL(`/${locale}/404`, this.#options.startUrl);
-                planner.enqueue(localized404.toString());
-                this.#routePaths.register(localized404.toString());
-              }
-            }
-          } catch {}
-        }
+      await writeFile(
+        path.join(this.#options.outputDir, "manifest.json"),
+        `${JSON.stringify(manifest, null, 2)}\n`,
+        "utf8",
+      );
 
-        const staticUrls = this.#rewriter.collectHtmlAssetUrls(rendered.html, rendered.url);
-        await this.#fetcher.fetchMissing(staticUrls, (sourceUrl) => {
-          this.#assetFetchesCompleted += 1;
-          this.#reportProgress("fetching", sourceUrl);
-        });
-        const localPath = this.#routePaths.register(nextUrl) ?? "index.html";
-        const rewrittenHtml = this.#rewriter.rewriteHtml(rendered.html, rendered.url, localPath);
-        await this.#writeRoute(localPath, rewrittenHtml);
+      this.#reportProgress("finalizing");
 
-        routes.push({ sourceUrl: rendered.url, localPath, discoveredLinks });
-        this.#routesCompleted = routes.length;
-        this.#reportProgress("rendering", rendered.url);
-      }
+      return manifest;
     } finally {
       await this.#renderer.stop();
     }
-
-    await this.#rewriteCapturedAssets();
-    this.#addRuntimeWarnings();
-
-    const manifest: ExportManifest = {
-      generatedAt: new Date().toISOString(),
-      startUrl: this.#options.startUrl.toString(),
-      sitemapRoutes,
-      routes,
-      assets: this.#archive.assets,
-      skipped: this.#archive.skipped,
-      externalUrls: await this.#collectExternalUrls(),
-      warnings: this.#warnings,
-    };
-
-    await writeFile(
-      path.join(this.#options.outputDir, "manifest.json"),
-      `${JSON.stringify(manifest, null, 2)}\n`,
-      "utf8",
-    );
-
-    this.#reportProgress("finalizing");
-
-    return manifest;
   }
 
   async #writeRoute(localPath: string, html: string): Promise<void> {
     const absolutePath = path.join(this.#options.outputDir, ...localPath.split("/"));
     await mkdir(path.dirname(absolutePath), { recursive: true });
     await writeFile(absolutePath, html, "utf8");
+  }
+
+  async #crawlRoutes(planner: RoutePlanner, activeLocales: Set<string>): Promise<ExportedRoute[]> {
+    const completedRoutes: Array<{ readonly order: number; readonly route: ExportedRoute }> = [];
+    const workers = Array.from({ length: this.#renderConcurrency }, async () => {
+      await this.#crawlWorker(planner, activeLocales, completedRoutes);
+    });
+    await Promise.allSettled(workers);
+
+    if (this.#crawlFailure) {
+      throw this.#crawlFailure;
+    }
+
+    const sortedRoutes = completedRoutes.sort((left, right) => left.order - right.order);
+    return sortedRoutes.map((entry) => entry.route);
+  }
+
+  async #crawlWorker(
+    planner: RoutePlanner,
+    activeLocales: Set<string>,
+    completedRoutes: Array<{ readonly order: number; readonly route: ExportedRoute }>,
+  ): Promise<void> {
+    for (;;) {
+      if (this.#crawlFailure) {
+        return;
+      }
+
+      if (this.#isPageLimitReached(this.#routesScheduled)) {
+        return;
+      }
+
+      const nextUrl = planner.next();
+      if (!nextUrl) {
+        if (this.#routesInFlight === 0) {
+          return;
+        }
+
+        await this.#waitForCrawlWork();
+        continue;
+      }
+
+      planner.markVisited(nextUrl);
+      const routeOrder = this.#routesScheduled;
+      this.#routesScheduled += 1;
+      this.#routesInFlight += 1;
+      this.#reportProgress("rendering", nextUrl);
+
+      try {
+        const route = await this.#crawlRoute(planner, activeLocales, nextUrl);
+        completedRoutes.push({ order: routeOrder, route });
+        this.#routesCompleted += 1;
+        this.#reportProgress("rendering", route.sourceUrl);
+      } catch (error: unknown) {
+        this.#crawlFailure ??= error instanceof Error ? error : new Error(String(error));
+        this.#signalCrawlWork();
+        throw this.#crawlFailure;
+      } finally {
+        this.#routesInFlight -= 1;
+        this.#signalCrawlWork();
+      }
+    }
+  }
+
+  async #crawlRoute(planner: RoutePlanner, activeLocales: Set<string>, nextUrl: string): Promise<ExportedRoute> {
+    const rendered = await this.#renderer.render(nextUrl);
+    const discoveredLinks = planner.discover(rendered.html, rendered.url);
+    this.#routePaths.registerAll(discoveredLinks);
+
+    for (const link of discoveredLinks) {
+      this.#enqueueLocalized404(planner, activeLocales, link);
+    }
+
+    const staticUrls = this.#rewriter.collectHtmlAssetUrls(rendered.html, rendered.url);
+    await this.#fetcher.fetchMissing(staticUrls, (sourceUrl) => {
+      this.#assetFetchesCompleted += 1;
+      this.#reportProgress("fetching", sourceUrl);
+    });
+    const localPath = this.#routePaths.register(nextUrl) ?? "index.html";
+    const rewrittenHtml = this.#rewriter.rewriteHtml(rendered.html, rendered.url, localPath);
+    await this.#writeRoute(localPath, rewrittenHtml);
+
+    return { sourceUrl: rendered.url, localPath, discoveredLinks };
+  }
+
+  #enqueueLocalized404(planner: RoutePlanner, activeLocales: Set<string>, rawUrl: string): void {
+    try {
+      const parsed = new URL(rawUrl);
+      const match = /^\/([a-z]{2}(?:-[a-zA-Z]{2,4})?)(?:\/|$)/.exec(parsed.pathname);
+      if (!match) {
+        return;
+      }
+
+      const locale = match[1];
+      if (activeLocales.has(locale)) {
+        return;
+      }
+
+      activeLocales.add(locale);
+      const localized404 = new URL(`/${locale}/404`, this.#options.startUrl);
+      planner.enqueue(localized404.toString());
+      this.#routePaths.register(localized404.toString());
+    } catch {
+      return;
+    }
+  }
+
+  async #waitForCrawlWork(): Promise<void> {
+    await new Promise<void>((resolve) => {
+      this.#crawlWaiters.push(resolve);
+    });
+  }
+
+  #signalCrawlWork(): void {
+    if (this.#crawlWaiters.length === 0) {
+      return;
+    }
+
+    const waiters = this.#crawlWaiters.splice(0, this.#crawlWaiters.length);
+    for (const resolve of waiters) {
+      resolve();
+    }
   }
 
   async #rewriteCapturedAssets(): Promise<void> {
@@ -199,7 +272,7 @@ export class ExportJob {
   }
 
   #shouldSkipTextScanDirectory(directoryPath: string): boolean {
-    const relativePath = path.relative(this.#options.outputDir, directoryPath).replace(/\\/g, "/");
+    const relativePath = path.relative(this.#options.outputDir, directoryPath).replaceAll("\\", "/");
     return relativePath === "assets/app.framerstatic.com" || relativePath === "assets/framer.com";
   }
 
@@ -246,7 +319,7 @@ export class ExportJob {
         urls.add(url);
       }
     });
-    return [...urls].sort();
+    return [...urls].sort((left, right) => left.localeCompare(right));
   }
 
   async #listTextFiles(directory: string): Promise<string[]> {

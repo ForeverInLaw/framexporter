@@ -11,6 +11,7 @@ import type { ReactExportOptions, ReactMotionMode } from "../react-export/types.
 import { ExportProgressReporter } from "./ExportProgressReporter.js";
 
 const DEFAULT_WAIT_MS = 300;
+const DEFAULT_RENDER_CONCURRENCY = 5;
 
 type ParsedArgs = {
   readonly command: string | undefined;
@@ -19,6 +20,7 @@ type ParsedArgs = {
   readonly exportsDir: string;
   readonly maxPages: number | undefined;
   readonly waitMs: number;
+  readonly renderConcurrency: number;
   readonly host: string;
   readonly port: number;
   readonly appName: string | undefined;
@@ -114,6 +116,7 @@ function parseArgs(argv: string[]): ParsedArgs {
   let exportsDir = "exports";
   let maxPages: number | undefined;
   let waitMs = DEFAULT_WAIT_MS;
+  let renderConcurrency = DEFAULT_RENDER_CONCURRENCY;
   let host = "127.0.0.1";
   let port = 4173;
   let appName: string | undefined;
@@ -142,6 +145,9 @@ function parseArgs(argv: string[]): ParsedArgs {
     } else if (token === "--wait-ms" && next) {
       waitMs = parsePositiveInt(next, "--wait-ms");
       index += 1;
+    } else if (token === "--render-concurrency" && next) {
+      renderConcurrency = parsePositiveInt(next, "--render-concurrency");
+      index += 1;
     } else if (token === "--host" && next) {
       host = next;
       index += 1;
@@ -155,7 +161,7 @@ function parseArgs(argv: string[]): ParsedArgs {
     }
   }
 
-  return { command, target, out, exportsDir, maxPages, waitMs, host, port, appName, motionMode };
+  return { command, target, out, exportsDir, maxPages, waitMs, renderConcurrency, host, port, appName, motionMode };
 }
 
 function normalizeRunArgs(argv: string[]): string[] {
@@ -285,6 +291,7 @@ function buildExportOptions(args: ParsedArgs, onProgress?: ExportProgressCallbac
     outputDir: path.resolve(args.out ?? defaultExportOutputDir(startUrl)),
     maxPages: args.maxPages,
     waitMs: args.waitMs,
+    renderConcurrency: args.renderConcurrency,
     onProgress,
   };
 }
@@ -354,7 +361,7 @@ function parsePositiveInt(value: string, optionName: string): number {
 }
 
 function printHelp(): void {
-  console.log(`framexporter\n\nUsage:\n  framexporter export <url> [--out exports/name] [--max-pages N] [--wait-ms ${DEFAULT_WAIT_MS}]\n  framexporter preview [exports/site] [--exports-dir exports] [--host 127.0.0.1] [--port 4173]\n  framexporter react [exports/site] [--out exports-react/name] [--exports-dir exports] [--app-name name] [--motion none|approximate]\n`);
+  console.log(`framexporter\n\nUsage:\n  framexporter export <url> [--out exports/name] [--max-pages N] [--wait-ms ${DEFAULT_WAIT_MS}] [--render-concurrency ${DEFAULT_RENDER_CONCURRENCY}]\n  framexporter preview [exports/site] [--exports-dir exports] [--host 127.0.0.1] [--port 4173]\n  framexporter react [exports/site] [--out exports-react/name] [--exports-dir exports] [--app-name name] [--motion none|approximate]\n`);
 }
 
 main().catch((error: unknown) => {

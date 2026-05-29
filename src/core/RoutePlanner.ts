@@ -2,12 +2,14 @@ import * as cheerio from "cheerio";
 
 export class RoutePlanner {
   readonly #startOrigin: string;
+  readonly #onEnqueue?: (url: string) => void;
   readonly #queue: string[] = [];
   readonly #queued = new Set<string>();
   readonly #visited = new Set<string>();
 
-  constructor(startUrl: URL) {
+  constructor(startUrl: URL, onEnqueue?: (url: string) => void) {
     this.#startOrigin = startUrl.origin;
+    this.#onEnqueue = onEnqueue;
     this.enqueue(startUrl.toString());
   }
 
@@ -26,6 +28,7 @@ export class RoutePlanner {
     }
     this.#queued.add(normalized);
     this.#queue.push(normalized);
+    this.#onEnqueue?.(normalized);
     return true;
   }
 
