@@ -8,7 +8,7 @@ import { RoutePathMapper } from "./RoutePathMapper.js";
 import { RoutePlanner } from "./RoutePlanner.js";
 import { SitemapDiscoverer } from "./SitemapDiscoverer.js";
 import { runWithConcurrency } from "./runWithConcurrency.js";
-import type { CapturedAsset, ExportManifest, ExportOptions, ExportedRoute } from "./types.js";
+import type { CapturedAsset, ExportManifest, ExportOptions, ExportProgress, ExportedRoute } from "./types.js";
 
 const MAX_TEXT_ASSET_REWRITE_CONCURRENCY = 4;
 const MAX_EXTERNAL_URL_SCAN_CONCURRENCY = 8;
@@ -22,6 +22,8 @@ export class ExportJob {
   readonly #routePaths: RoutePathMapper;
   readonly #sitemapDiscoverer = new SitemapDiscoverer();
   readonly #warnings: string[] = [];
+  #routesCompleted = 0;
+  #assetFetchesCompleted = 0;
 
   constructor(options: ExportOptions) {
     this.#options = options;
@@ -66,6 +68,7 @@ export class ExportJob {
 
     await this.#renderer.start();
     try {
+      this.#reportProgress("rendering", this.#options.startUrl.toString());
       while (!this.#isPageLimitReached(routes.length)) {
         const nextUrl = planner.next();
         if (!nextUrl) {
@@ -73,6 +76,7 @@ export class ExportJob {
         }
 
         planner.markVisited(nextUrl);
+        this.#reportProgress("rendering", nextUrl);
         const rendered = await this.#renderer.render(nextUrl);
         const discoveredLinks = planner.discover(rendered.html, rendered.url);
         this.#routePaths.registerAll(discoveredLinks);
@@ -95,12 +99,17 @@ export class ExportJob {
         }
 
         const staticUrls = this.#rewriter.collectHtmlAssetUrls(rendered.html, rendered.url);
-        await this.#fetcher.fetchMissing(staticUrls);
+        await this.#fetcher.fetchMissing(staticUrls, (sourceUrl) => {
+          this.#assetFetchesCompleted += 1;
+          this.#reportProgress("fetching", sourceUrl);
+        });
         const localPath = this.#routePaths.register(nextUrl) ?? "index.html";
         const rewrittenHtml = this.#rewriter.rewriteHtml(rendered.html, rendered.url, localPath);
         await this.#writeRoute(localPath, rewrittenHtml);
 
         routes.push({ sourceUrl: rendered.url, localPath, discoveredLinks });
+        this.#routesCompleted = routes.length;
+        this.#reportProgress("rendering", rendered.url);
       }
     } finally {
       await this.#renderer.stop();
@@ -125,6 +134,8 @@ export class ExportJob {
       `${JSON.stringify(manifest, null, 2)}\n`,
       "utf8",
     );
+
+    this.#reportProgress("finalizing");
 
     return manifest;
   }
@@ -158,7 +169,10 @@ export class ExportJob {
 
     const absolutePath = this.#absoluteOutputPath(asset.localPath);
     const text = await readFile(absolutePath, "utf8");
-    await this.#fetcher.fetchMissing(this.#rewriter.collectTextAssetUrls(text, asset.sourceUrl));
+    await this.#fetcher.fetchMissing(this.#rewriter.collectTextAssetUrls(text, asset.sourceUrl), (sourceUrl) => {
+      this.#assetFetchesCompleted += 1;
+      this.#reportProgress("fetching", sourceUrl);
+    });
     const rewritten = /text\/css/i.test(asset.contentType)
       ? this.#rewriter.rewriteCss(text, asset.sourceUrl, asset.localPath)
       : this.#rewriter.rewriteCapturedText(text, asset.sourceUrl, asset.localPath);
@@ -210,6 +224,17 @@ export class ExportJob {
 
   #isPageLimitReached(routeCount: number): boolean {
     return this.#options.maxPages !== undefined && routeCount >= this.#options.maxPages;
+  }
+
+  #reportProgress(phase: ExportProgress["phase"], currentUrl?: string): void {
+    this.#options.onProgress?.({
+      phase,
+      routesCompleted: this.#routesCompleted,
+      assetFetchesCompleted: this.#assetFetchesCompleted,
+      assetsSaved: this.#archive.assets.length,
+      skippedResponses: this.#archive.skipped.length,
+      currentUrl,
+    });
   }
 
   async #collectExternalUrls(): Promise<string[]> {

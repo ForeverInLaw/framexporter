@@ -1,8 +1,22 @@
+export type ExportProgressPhase = "rendering" | "fetching" | "finalizing";
+
+export type ExportProgress = {
+  readonly phase: ExportProgressPhase;
+  readonly routesCompleted: number;
+  readonly assetFetchesCompleted: number;
+  readonly assetsSaved: number;
+  readonly skippedResponses: number;
+  readonly currentUrl?: string;
+};
+
+export type ExportProgressReporter = (progress: ExportProgress) => void;
+
 export type ExportOptions = {
   readonly startUrl: URL;
   readonly outputDir: string;
   readonly maxPages: number | undefined;
   readonly waitMs: number;
+  readonly onProgress?: ExportProgressReporter;
 };
 
 export type CapturedAsset = {

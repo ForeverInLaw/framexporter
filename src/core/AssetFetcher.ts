@@ -8,24 +8,28 @@ export class AssetFetcher {
 
   constructor(private readonly archive: ResponseArchive) {}
 
-  async fetchMissing(urls: string[]): Promise<void> {
+  async fetchMissing(urls: string[], onFetched?: (sourceUrl: string) => void): Promise<void> {
     const uniqueUrls = [...new Set(urls)].filter((url) => !this.archive.has(url));
     await runWithConcurrency(uniqueUrls, MAX_CONCURRENT_FETCHES, async (sourceUrl) => {
-      await this.#fetchDeduped(sourceUrl);
+      const didFetch = await this.#fetchDeduped(sourceUrl);
+      if (didFetch) {
+        onFetched?.(sourceUrl);
+      }
     });
   }
 
-  async #fetchDeduped(sourceUrl: string): Promise<void> {
+  async #fetchDeduped(sourceUrl: string): Promise<boolean> {
     const pending = this.#pending.get(sourceUrl);
     if (pending) {
       await pending;
-      return;
+      return false;
     }
 
     const task = this.#fetchOne(sourceUrl);
     this.#pending.set(sourceUrl, task);
     try {
       await task;
+      return true;
     } finally {
       this.#pending.delete(sourceUrl);
     }

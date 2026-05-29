@@ -5,9 +5,10 @@ import { createInterface } from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 import { ExportJob } from "../core/ExportJob.js";
 import { StaticPreviewServer } from "../core/StaticPreviewServer.js";
-import type { ExportOptions } from "../core/types.js";
+import type { ExportOptions, ExportProgressReporter as ExportProgressCallback } from "../core/types.js";
 import { ReactExportJob } from "../react-export/ReactExportJob.js";
 import type { ReactExportOptions, ReactMotionMode } from "../react-export/types.js";
+import { ExportProgressReporter } from "./ExportProgressReporter.js";
 
 const DEFAULT_WAIT_MS = 300;
 
@@ -47,18 +48,24 @@ async function main(): Promise<void> {
 }
 
 async function runExport(args: ParsedArgs): Promise<void> {
-  const options = buildExportOptions(args);
+  const reporter = new ExportProgressReporter();
+  const options = buildExportOptions(args, (progress) => reporter.update(progress));
   const job = new ExportJob(options);
-  const manifest = await job.run();
+  try {
+    const manifest = await job.run();
 
-  console.log(`Exported ${manifest.routes.length} route(s).`);
-  console.log(`Saved ${manifest.assets.length} asset(s).`);
-  console.log(`Output: ${options.outputDir}`);
-  if (manifest.warnings.length > 0) {
-    console.log("Warnings:");
-    for (const warning of manifest.warnings) {
-      console.log(`- ${warning}`);
+    reporter.finish();
+    console.log(`Exported ${manifest.routes.length} route(s).`);
+    console.log(`Saved ${manifest.assets.length} asset(s).`);
+    console.log(`Output: ${options.outputDir}`);
+    if (manifest.warnings.length > 0) {
+      console.log("Warnings:");
+      for (const warning of manifest.warnings) {
+        console.log(`- ${warning}`);
+      }
     }
+  } finally {
+    reporter.finish();
   }
 }
 
@@ -263,7 +270,7 @@ async function hasIndexHtml(exportPath: string): Promise<boolean> {
   }
 }
 
-function buildExportOptions(args: ParsedArgs): ExportOptions {
+function buildExportOptions(args: ParsedArgs, onProgress?: ExportProgressCallback): ExportOptions {
   if (!args.target) {
     throw new Error("URL is required.");
   }
@@ -278,6 +285,7 @@ function buildExportOptions(args: ParsedArgs): ExportOptions {
     outputDir: path.resolve(args.out ?? defaultExportOutputDir(startUrl)),
     maxPages: args.maxPages,
     waitMs: args.waitMs,
+    onProgress,
   };
 }
 
