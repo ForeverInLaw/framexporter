@@ -10,6 +10,9 @@
 - Experimental React exports convert rendered static HTML into a Vite/React project, but do not yet infer semantic component props or rebuild complex Framer runtime interactions.
 - Reports dynamic or external behavior it cannot localize.
 
+## !!! Note
+React export is currently broken. I might drop support for this feature since reverse-engineering every bundle is a massive time sink, and frankly, I'm too lazy for that.
+
 ## Usage
 
 ```bash
