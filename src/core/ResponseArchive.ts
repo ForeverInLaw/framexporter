@@ -143,6 +143,9 @@ export class ResponseArchive {
     if (/^(api|events)\.framer\.com$/i.test(host)) {
       return `dynamic Framer service skipped: ${host}`;
     }
+    if (host === "api.github.com") {
+      return `external GitHub API skipped: ${host}`;
+    }
     return undefined;
   }
 
